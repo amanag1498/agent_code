@@ -120,3 +120,31 @@ class PromptBuilder:
             "}\n"
             f"Evidence:\n{json.dumps(evidence, indent=2)}"
         )
+
+    def specialized_finding_generation_prompt(self, evidence: dict, max_findings: int) -> str:
+        focus = evidence.get("analysis_focus", "specialized")
+        return (
+            f"You are performing a focused {focus} review of a code repository.\n"
+            "Prioritize precise, evidence-backed findings only for this focus area.\n"
+            "Stay grounded strictly in the provided evidence only.\n"
+            "Do not invent hidden code paths, frameworks, or exploit chains outside the evidence.\n"
+            f"Return at most {max_findings} findings.\n"
+            "If evidence is weak, use verdict uncertain and set needs_human_review to true.\n"
+            "Do not wrap the JSON in markdown fences.\n"
+            "Escape backslashes inside JSON strings correctly. Prefer forward slashes in file paths when possible.\n"
+            "Return JSON only matching this schema:\n"
+            "{"
+            '"findings":['
+            "{"
+            '"rule_id":"string","title":"string","description":"string","severity":"critical|high|medium|low|info|unknown",'
+            '"category":"security|vulnerability|architecture|quality|risky_change|dependency",'
+            '"file_path":"string|null","line_start":1,"line_end":1,'
+            '"verdict":"true_positive|likely_true_positive|uncertain|likely_false_positive|false_positive",'
+            '"confidence":0.0,'
+            '"severity_override":"critical|high|medium|low|info|unchanged",'
+            '"impact_summary":"string","reasoning_summary":"string","remediation_summary":"string",'
+            '"related_change_risk":"string","needs_human_review":true'
+            "}"
+            "]}"
+            f"\nEvidence:\n{json.dumps(evidence, indent=2)}"
+        )

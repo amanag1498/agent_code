@@ -5,12 +5,41 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 from ai_repo_agent.core.models import EmbeddingChunkRecord, FindingRecord, RepoSnapshotRecord, SymbolRecord
 
 
 class EvidenceBuilder:
     """Build minimal evidence packages for LLM review."""
+
+    HOTSPOT_TERMS = (
+        "auth",
+        "login",
+        "token",
+        "session",
+        "secret",
+        "config",
+        "security",
+        "permission",
+        "admin",
+        "middleware",
+        "api",
+        "route",
+        "controller",
+        "service",
+        "db",
+        "query",
+        "model",
+        "payment",
+        "crypto",
+    )
+    SPECIALIZED_PASSES = {
+        "auth": ("auth", "login", "token", "session", "jwt", "permission", "admin", "middleware"),
+        "validation": ("validate", "validator", "schema", "sanitize", "input", "request", "payload", "form"),
+        "dependency": ("package", "requirement", "dependency", "lock", "version", "manifest", "import"),
+        "secrets_config": ("secret", "config", "env", "credential", "key", "password", "vault", "setting"),
+    }
 
     def build_finding_evidence(
         self,
@@ -121,6 +150,105 @@ class EvidenceBuilder:
         evidence_hash = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode("utf-8")).hexdigest()
         return evidence, evidence_hash
 
+    def build_repo_analysis_batches(
+        self,
+        repo_root: Path,
+        snapshot: RepoSnapshotRecord,
+        symbols: list[SymbolRecord],
+        chunks: list[EmbeddingChunkRecord],
+        architecture_observations: list[str],
+        dependency_summary: list[dict[str, Any]],
+        focus_file_paths: set[str] | None = None,
+        max_batches: int = 4,
+        batch_size: int = 4,
+    ) -> list[tuple[dict[str, Any], str]]:
+        prioritized = self._prioritize_chunks(chunks, focus_file_paths or set())
+        chunk_groups = self._build_module_clusters(prioritized, batch_size=batch_size, max_groups=max_batches)
+        if not chunk_groups:
+            chunk_groups = [[]]
+        batches: list[tuple[dict[str, Any], str]] = []
+        for index, group in enumerate(chunk_groups[:max_batches], start=1):
+            file_paths = {chunk.file_path for chunk in group}
+            grouped_symbols = [symbol for symbol in symbols if symbol.file_path in file_paths][:24]
+            evidence = {
+                "batch_context": {
+                    "batch_number": index,
+                    "batch_count": min(len(chunk_groups), max_batches),
+                    "repo_root": str(repo_root),
+                    "focus_files": sorted(file_paths),
+                    "requested_focus_files": sorted(focus_file_paths or set())[:40],
+                },
+                "snapshot": {
+                    "branch": snapshot.branch,
+                    "commit_hash": snapshot.commit_hash,
+                    "dirty_flag": snapshot.dirty_flag,
+                    "diff_summary": snapshot.diff_summary,
+                },
+                "architecture_observations": architecture_observations[:6],
+                "dependencies": dependency_summary[:10],
+                "symbols": [
+                    {
+                        "file_path": symbol.file_path,
+                        "symbol_name": symbol.symbol_name,
+                        "symbol_kind": symbol.symbol_kind,
+                        "line_start": symbol.line_start,
+                        "line_end": symbol.line_end,
+                    }
+                    for symbol in grouped_symbols
+                ],
+                "code_chunks": [
+                    {
+                        "file_path": chunk.file_path,
+                        "metadata": self._safe_metadata(chunk.metadata_json),
+                        "chunk_text": chunk.chunk_text[:1600],
+                    }
+                    for chunk in group
+                ],
+            }
+            evidence_hash = self._batch_cache_key(evidence)
+            batches.append((evidence, evidence_hash))
+        return batches
+
+    def build_specialized_analysis_batches(
+        self,
+        repo_root: Path,
+        snapshot: RepoSnapshotRecord,
+        chunks: list[EmbeddingChunkRecord],
+        dependency_summary: list[dict[str, Any]],
+        focus_file_paths: set[str] | None = None,
+    ) -> list[tuple[dict[str, Any], str]]:
+        del repo_root
+        prioritized = self._prioritize_chunks(chunks, focus_file_paths or set())
+        results: list[tuple[dict[str, Any], str]] = []
+        for focus_name, terms in self.SPECIALIZED_PASSES.items():
+            relevant = [chunk for chunk in prioritized if self._matches_focus(chunk, terms)][:4]
+            if focus_name == "dependency" and not relevant and dependency_summary:
+                relevant = prioritized[:2]
+            if not relevant and focus_name != "dependency":
+                continue
+            evidence = {
+                "analysis_focus": focus_name,
+                "snapshot": {
+                    "branch": snapshot.branch,
+                    "commit_hash": snapshot.commit_hash,
+                    "dirty_flag": snapshot.dirty_flag,
+                    "diff_summary": snapshot.diff_summary,
+                },
+                "dependencies": dependency_summary[:16],
+                "focus_terms": list(terms),
+                "code_chunks": [
+                    {
+                        "file_path": chunk.file_path,
+                        "metadata": self._safe_metadata(chunk.metadata_json),
+                        "chunk_text": chunk.chunk_text[:1600],
+                    }
+                    for chunk in relevant
+                ],
+            }
+            evidence_hash = self._batch_cache_key(evidence)
+            results.append((evidence, evidence_hash))
+        return results
+
     def build_chat_evidence(
         self,
         question: str,
@@ -174,3 +302,98 @@ class EvidenceBuilder:
         }
         evidence_hash = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode("utf-8")).hexdigest()
         return evidence, evidence_hash
+
+    def _prioritize_chunks(self, chunks: list[EmbeddingChunkRecord], focus_file_paths: set[str]) -> list[EmbeddingChunkRecord]:
+        return sorted(
+            chunks,
+            key=lambda chunk: (
+                -self._chunk_priority_score(chunk, focus_file_paths),
+                len(chunk.chunk_text),
+                chunk.file_path,
+            ),
+        )
+
+    def _chunk_priority_score(self, chunk: EmbeddingChunkRecord, focus_file_paths: set[str]) -> int:
+        file_path = chunk.file_path.lower()
+        metadata = self._safe_metadata(chunk.metadata_json)
+        score = 0
+        if chunk.file_path in focus_file_paths:
+            score += 40
+        for term in self.HOTSPOT_TERMS:
+            if term in file_path:
+                score += 6
+            if term in chunk.chunk_text.lower():
+                score += 2
+        score += min(8, int(metadata.get("lines", 0)) // 25) if isinstance(metadata.get("lines"), int) else 0
+        if "test" in file_path:
+            score -= 6
+        if "vendor" in file_path or "node_modules" in file_path:
+            score -= 10
+        return score
+
+    def _build_module_clusters(
+        self,
+        chunks: list[EmbeddingChunkRecord],
+        batch_size: int,
+        max_groups: int,
+    ) -> list[list[EmbeddingChunkRecord]]:
+        buckets: dict[str, list[EmbeddingChunkRecord]] = {}
+        for chunk in chunks:
+            metadata = self._safe_metadata(chunk.metadata_json)
+            directory = chunk.file_path.rsplit("/", 1)[0] if "/" in chunk.file_path else "root"
+            imports = metadata.get("imports", [])
+            dominant_import = imports[0] if imports else ""
+            cluster_key = f"{directory}|{dominant_import}"
+            buckets.setdefault(cluster_key, []).append(chunk)
+        ranked_groups = sorted(
+            buckets.values(),
+            key=lambda group: sum(self._chunk_priority_score(chunk, set()) for chunk in group),
+            reverse=True,
+        )
+        groups: list[list[EmbeddingChunkRecord]] = []
+        for group in ranked_groups[:max_groups]:
+            groups.append(group[:batch_size])
+        if not groups:
+            groups = [chunks[:batch_size]]
+        return groups
+
+    def _matches_focus(self, chunk: EmbeddingChunkRecord, terms: tuple[str, ...]) -> bool:
+        haystack = f"{chunk.file_path}\n{chunk.chunk_text}\n{chunk.metadata_json}".lower()
+        return any(term in haystack for term in terms)
+
+    def _batch_cache_key(self, evidence: dict[str, Any]) -> str:
+        chunk_signatures = [
+            {
+                "file_path": chunk["file_path"],
+                "line_start": chunk["metadata"].get("line_start"),
+                "line_end": chunk["metadata"].get("line_end"),
+                "file_sha256": chunk["metadata"].get("file_sha256"),
+            }
+            for chunk in evidence.get("code_chunks", [])
+        ]
+        symbol_signatures = [
+            {
+                "file_path": symbol["file_path"],
+                "symbol_name": symbol["symbol_name"],
+                "symbol_kind": symbol["symbol_kind"],
+                "line_start": symbol["line_start"],
+                "line_end": symbol["line_end"],
+            }
+            for symbol in evidence.get("symbols", [])
+        ]
+        cache_payload = {
+            "batch_context": evidence.get("batch_context", {}),
+            "snapshot": evidence.get("snapshot", {}),
+            "architecture_observations": evidence.get("architecture_observations", []),
+            "dependencies": evidence.get("dependencies", []),
+            "chunks": chunk_signatures,
+            "symbols": symbol_signatures,
+        }
+        return hashlib.sha256(json.dumps(cache_payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _safe_metadata(text: str) -> dict[str, Any]:
+        try:
+            return json.loads(text)
+        except Exception:
+            return {}

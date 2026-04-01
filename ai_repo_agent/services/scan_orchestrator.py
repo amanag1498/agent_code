@@ -106,6 +106,7 @@ class ScanOrchestrator:
                 fingerprint=fingerprint,
             )
         )
+        previous_snapshot = self.snapshot_store.latest_for_repo(repository.id or 0)
         snapshot = self.snapshot_store.create(
             RepoSnapshotRecord(
                 id=None,
@@ -123,6 +124,11 @@ class ScanOrchestrator:
         self._progress(progress_callback, "Persisting file inventory", 18)
         self._persist_files(snapshot.id or 0, repository.id or 0, repo_context.files)
         LOGGER.info("Persisted file inventory for snapshot %s", snapshot.id)
+        changed_focus_paths = self._determine_focus_paths(
+            previous_snapshot=previous_snapshot,
+            current_snapshot=snapshot,
+            repo_context=repo_context,
+        )
         self._progress(progress_callback, "Persisting dependencies", 28)
         dep_records = [
             DependencyRecord(
@@ -208,6 +214,8 @@ class ScanOrchestrator:
                     chunks=stored_chunks,
                     architecture_observations=architecture_observations,
                     dependency_summary=[asdict(dep) for dep in dep_records],
+                    focus_file_paths=changed_focus_paths,
+                    progress_callback=progress_callback,
                 )
                 findings = [
                     Finding(
@@ -345,6 +353,36 @@ class ScanOrchestrator:
 
     def _provider(self) -> ProviderBase | None:
         return create_provider(self.settings)
+
+    def _determine_focus_paths(
+        self,
+        previous_snapshot: RepoSnapshotRecord | None,
+        current_snapshot: RepoSnapshotRecord,
+        repo_context,
+    ) -> set[str]:
+        focus_paths = set(repo_context.git_state.changed_files)
+        if previous_snapshot and previous_snapshot.id and current_snapshot.id:
+            focus_paths.update(
+                self.file_store.changed_paths_between_snapshots(previous_snapshot.id, current_snapshot.id)
+            )
+        if not focus_paths:
+            focus_paths.update(self._heuristic_focus_paths(repo_context.files))
+        return focus_paths
+
+    @staticmethod
+    def _heuristic_focus_paths(files) -> set[str]:
+        ranked = []
+        for item in files:
+            path = item.path.lower()
+            score = 0
+            for term in ("auth", "api", "route", "controller", "service", "config", "secret", "db", "query"):
+                if term in path:
+                    score += 5
+            if "test" in path:
+                score -= 4
+            ranked.append((score, item.path))
+        ranked.sort(reverse=True)
+        return {path for score, path in ranked[:15] if score > 0}
 
     @staticmethod
     def _progress(progress_callback: Callable[[str, int], None] | None, stage: str, progress: int) -> None:
