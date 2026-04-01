@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from typing import TypeVar
 
@@ -18,6 +19,8 @@ TModel = TypeVar("TModel", bound=BaseModel)
 
 class GeminiProvider(ProviderBase):
     """Gemini provider using the public REST API."""
+
+    provider_name = "gemini"
 
     def __init__(self, api_key: str, model_name: str, timeout_seconds: int = 20, retry_count: int = 2) -> None:
         self.api_key = api_key
@@ -49,7 +52,7 @@ class GeminiProvider(ProviderBase):
                     raise RuntimeError(f"Gemini temporary error: {response.status_code} {response.text[:200]}")
                 response.raise_for_status()
                 text = self._extract_text(response.json())
-                data = json.loads(text)
+                data = self._parse_json_text(text)
                 return response_model.model_validate(data)
             except (requests.RequestException, ValidationError, json.JSONDecodeError, RuntimeError) as exc:
                 last_error = exc
@@ -67,3 +70,47 @@ class GeminiProvider(ProviderBase):
         if not parts:
             raise RuntimeError("Gemini returned empty content.")
         return parts[0].get("text", "{}")
+
+    @classmethod
+    def _parse_json_text(cls, text: str) -> dict:
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cls._strip_code_fence(cleaned)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            extracted = cls._extract_json_block(cleaned)
+            if extracted != cleaned:
+                try:
+                    return json.loads(extracted)
+                except json.JSONDecodeError:
+                    cleaned = extracted
+            repaired = cls._repair_invalid_escapes(cleaned)
+            return json.loads(repaired)
+
+    @staticmethod
+    def _strip_code_fence(text: str) -> str:
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _extract_json_block(text: str) -> str:
+        start_candidates = [index for index in (text.find("{"), text.find("[")) if index != -1]
+        if not start_candidates:
+            return text
+        start = min(start_candidates)
+        end_object = text.rfind("}")
+        end_array = text.rfind("]")
+        end = max(end_object, end_array)
+        if end == -1 or end < start:
+            return text
+        return text[start : end + 1]
+
+    @staticmethod
+    def _repair_invalid_escapes(text: str) -> str:
+        # Preserve valid JSON escapes and neutralize stray backslashes often emitted in paths/diffs.
+        return re.sub(r"\\(?![\"\\/bfnrtu])", r"\\\\", text)

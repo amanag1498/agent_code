@@ -1,4 +1,4 @@
-"""Gemini-first workflows for findings, repo chat, and patch suggestions."""
+"""Structured LLM workflows for findings, repo chat, and patch suggestions."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from ai_repo_agent.llm.prompts import PROMPT_VERSION, PromptBuilder
 from ai_repo_agent.llm.provider import ProviderBase
 
 
-class GeminiFindingGenerator:
+class LLMFindingGenerator:
     """Generate normalized findings directly from repository evidence."""
 
     def __init__(self, provider: ProviderBase, review_store: ReviewStore, max_findings: int = 20) -> None:

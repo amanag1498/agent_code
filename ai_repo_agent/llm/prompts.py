@@ -9,7 +9,7 @@ PROMPT_VERSION = "v1"
 
 
 class PromptBuilder:
-    """Build grounded prompts for Gemini."""
+    """Build grounded prompts for structured LLM providers."""
 
     def finding_generation_prompt(self, evidence: dict, max_findings: int) -> str:
         return (
@@ -19,6 +19,8 @@ class PromptBuilder:
             "Return at most "
             f"{max_findings} findings and omit low-signal guesses.\n"
             "If evidence is weak, use verdict uncertain and set needs_human_review to true.\n"
+            "Do not wrap the JSON in markdown fences.\n"
+            "Escape backslashes inside JSON strings correctly. Prefer forward slashes in file paths when possible.\n"
             "Return JSON only matching this schema:\n"
             "{"
             '"findings":['
@@ -42,6 +44,8 @@ class PromptBuilder:
             "Stay grounded strictly in the provided evidence only.\n"
             "Do not invent repository facts, exploit paths, dependencies, or mitigations not supported by the evidence.\n"
             "If evidence is insufficient, return uncertain and set needs_human_review to true.\n"
+            "Do not wrap the JSON in markdown fences.\n"
+            "Escape backslashes inside JSON strings correctly. Prefer forward slashes in file paths when possible.\n"
             "Return JSON only matching this schema:\n"
             "{"
             '"verdict":"true_positive|likely_true_positive|uncertain|likely_false_positive|false_positive",'
@@ -60,6 +64,8 @@ class PromptBuilder:
         return (
             "You are reviewing changed code for security and risk impact.\n"
             "Use only the provided diff context and prior findings. Do not infer hidden code.\n"
+            "Do not wrap the JSON in markdown fences.\n"
+            "Escape backslashes inside JSON strings correctly.\n"
             "Return JSON only matching this schema:\n"
             "{"
             '"confidence":0.0,'
@@ -76,6 +82,8 @@ class PromptBuilder:
         return (
             "You are summarizing repository risk and release readiness.\n"
             "Stay grounded in the evidence. Do not add unsupported claims.\n"
+            "Do not wrap the JSON in markdown fences.\n"
+            "Escape backslashes inside JSON strings correctly.\n"
             "Return JSON only matching this schema:\n"
             "{"
             '"confidence":0.0,'
@@ -91,6 +99,8 @@ class PromptBuilder:
         return (
             "You are answering a repository question using only retrieved local evidence.\n"
             "Do not claim anything not supported by the snippets or history.\n"
+            "Do not wrap the JSON in markdown fences.\n"
+            "Escape backslashes inside JSON strings correctly.\n"
             "Return JSON only matching this schema:\n"
             "{"
             '"answer":"string","cited_files":["string"],"confidence":0.0,"needs_human_review":true'
@@ -102,6 +112,8 @@ class PromptBuilder:
         return (
             "You are proposing a patch for a repository finding using only the supplied code evidence.\n"
             "Do not invent surrounding code beyond the shown snippets. If uncertain, keep the patch conservative.\n"
+            "Do not wrap the JSON in markdown fences.\n"
+            "Escape backslashes inside JSON strings correctly.\n"
             "Return JSON only matching this schema:\n"
             "{"
             '"summary":"string","rationale":"string","suggested_diff":"string","confidence":0.0,"needs_human_review":true'

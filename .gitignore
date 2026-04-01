@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+*.log
+*.sqlite
+*.sqlite3
+
+# Local keys or accidental secrets
+*.pem
+*.key
+amanag1498
+amanag1498.pub

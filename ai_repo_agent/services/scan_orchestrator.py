@@ -6,6 +6,7 @@ import json
 import logging
 from dataclasses import asdict
 from datetime import datetime
+from typing import Callable
 
 from ai_repo_agent.analysis.architecture import ArchitectureMapper
 from ai_repo_agent.analysis.chunks import ChunkBuilder
@@ -39,9 +40,10 @@ from ai_repo_agent.db.repositories import (
     SnapshotStore,
     SymbolStore,
 )
-from ai_repo_agent.llm.gemini_provider import GeminiProvider
+from ai_repo_agent.llm.factory import create_provider
 from ai_repo_agent.llm.judge import RepoJudge
-from ai_repo_agent.llm.workflows import GeminiFindingGenerator
+from ai_repo_agent.llm.provider import ProviderBase
+from ai_repo_agent.llm.workflows import LLMFindingGenerator
 from ai_repo_agent.repo.inventory import RepoFingerprintService
 from ai_repo_agent.repo.loader import RepoLoader
 
@@ -49,7 +51,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class ScanOrchestrator:
-    """Run repo ingestion, local memory extraction, Gemini findings, and persistence."""
+    """Run repo ingestion, local memory extraction, LLM findings, and persistence."""
 
     def __init__(
         self,
@@ -83,7 +85,8 @@ class ScanOrchestrator:
         self.symbol_indexer = SymbolIndexer()
         self.chunk_builder = ChunkBuilder()
 
-    def scan(self, path: str) -> ScanResult:
+    def scan(self, path: str, progress_callback: Callable[[str, int], None] | None = None) -> ScanResult:
+        self._progress(progress_callback, "Loading repository context", 5)
         LOGGER.info("Loading repository context for %s", path)
         repo_context = self.loader.load(path)
         fingerprint = self.fingerprint_service.fingerprint(repo_context.files)
@@ -117,8 +120,10 @@ class ScanOrchestrator:
                 summary=repo_context.summary,
             )
         )
+        self._progress(progress_callback, "Persisting file inventory", 18)
         self._persist_files(snapshot.id or 0, repository.id or 0, repo_context.files)
         LOGGER.info("Persisted file inventory for snapshot %s", snapshot.id)
+        self._progress(progress_callback, "Persisting dependencies", 28)
         dep_records = [
             DependencyRecord(
                 id=None,
@@ -133,6 +138,7 @@ class ScanOrchestrator:
         self.dependency_store.replace_for_snapshot(snapshot.id or 0, dep_records)
         LOGGER.info("Persisted %s dependencies for snapshot %s", len(dep_records), snapshot.id)
 
+        self._progress(progress_callback, "Indexing symbols", 40)
         symbols = self.symbol_indexer.index(repo_context.files)
         self.symbol_store.replace_for_snapshot(
             snapshot.id or 0,
@@ -151,6 +157,7 @@ class ScanOrchestrator:
         )
         LOGGER.info("Persisted %s symbols for snapshot %s", len(symbols), snapshot.id)
 
+        self._progress(progress_callback, "Building code memory", 52)
         chunks = self.chunk_builder.build(repo_context.files, max_lines=self.settings.embedding_chunk_lines)
         self.embedding_store.replace_for_snapshot(
             snapshot.id or 0,
@@ -179,15 +186,20 @@ class ScanOrchestrator:
                 started_at=datetime.utcnow().isoformat(timespec="seconds"),
                 finished_at=None,
                 status="running",
-                scanner_name="gemini-finding-generator",
-                message="Gemini analysis started",
+                scanner_name="llm-finding-generator",
+                message="LLM analysis started",
             )
         )
         if provider:
-            LOGGER.info("Gemini provider configured. Starting Gemini finding generation for snapshot %s", snapshot.id)
+            self._progress(progress_callback, f"Running {provider.provider_name} analysis", 64)
+            LOGGER.info(
+                "LLM provider configured (%s). Starting finding generation for snapshot %s",
+                provider.provider_name,
+                snapshot.id,
+            )
             stored_symbols = self.symbol_store.list_for_snapshot(snapshot.id or 0)
             stored_chunks = self.embedding_store.list_for_snapshot(snapshot.id or 0)
-            generator = GeminiFindingGenerator(provider, self.review_store, self.settings.llm_max_findings_per_scan)
+            generator = LLMFindingGenerator(provider, self.review_store, self.settings.llm_max_findings_per_scan)
             try:
                 generated, evidence_hash = generator.generate(
                     repo_root=repo_context.path,
@@ -199,7 +211,7 @@ class ScanOrchestrator:
                 )
                 findings = [
                     Finding(
-                        scanner_name="gemini",
+                        scanner_name=provider.provider_name,
                         rule_id=item.rule_id,
                         title=item.title,
                         description=item.description,
@@ -220,7 +232,7 @@ class ScanOrchestrator:
                         FindingRecord(
                             id=None,
                             repo_snapshot_id=snapshot.id or 0,
-                            scanner_name="gemini",
+                            scanner_name=provider.provider_name,
                             rule_id=finding.rule_id,
                             title=finding.title,
                             description=finding.description,
@@ -240,12 +252,13 @@ class ScanOrchestrator:
                 self.scan_run_store.update_status(
                     run_id,
                     "completed",
-                    f"Generated {len(stored_findings)} Gemini findings",
+                    f"Generated {len(stored_findings)} LLM findings",
                     datetime.utcnow().isoformat(timespec="seconds"),
                 )
-                LOGGER.info("Gemini finding generation completed: findings=%s snapshot=%s", len(stored_findings), snapshot.id)
+                self._progress(progress_callback, "Persisted LLM findings", 80)
+                LOGGER.info("LLM finding generation completed: findings=%s snapshot=%s", len(stored_findings), snapshot.id)
             except Exception as exc:
-                LOGGER.warning("Gemini finding generation failed: %s", exc)
+                LOGGER.warning("LLM finding generation failed: %s", exc)
                 self.scan_run_store.update_status(
                     run_id,
                     "failed",
@@ -253,14 +266,16 @@ class ScanOrchestrator:
                     datetime.utcnow().isoformat(timespec="seconds"),
                 )
         else:
-            LOGGER.info("Gemini provider not configured. Skipping Gemini finding generation for snapshot %s", snapshot.id)
+            LOGGER.info("LLM provider not configured. Skipping finding generation for snapshot %s", snapshot.id)
             self.scan_run_store.update_status(
                 run_id,
                 "skipped",
-                "Gemini API key not configured",
+                "LLM provider not configured",
                 datetime.utcnow().isoformat(timespec="seconds"),
             )
+            self._progress(progress_callback, "Skipping LLM stage", 74)
 
+        self._progress(progress_callback, "Comparing with previous snapshot", 86)
         previous_snapshot = self.snapshot_store.previous_for_repo(repository.id or 0, snapshot.id or 0)
         previous_findings = self.finding_store.list_for_snapshot(previous_snapshot.id) if previous_snapshot else []
         previous_dependencies = self.dependency_store.list_for_snapshot(previous_snapshot.id) if previous_snapshot else []
@@ -284,17 +299,19 @@ class ScanOrchestrator:
         )
         if provider:
             try:
+                self._progress(progress_callback, "Building repo-level review", 94)
                 repo_judge = RepoJudge(provider, self.review_store)
                 repo_judge.review(snapshot, compare_result.summary, stored_findings[:5])
-                LOGGER.info("Repo-level Gemini review completed for snapshot %s", snapshot.id)
+                LOGGER.info("Repo-level LLM review completed for snapshot %s", snapshot.id)
             except Exception as exc:
-                LOGGER.warning("Repo review failed: %s", exc)
+                LOGGER.warning("LLM repo review failed: %s", exc)
         snapshot.summary = self.summary_builder.scan_summary(len(stored_findings), risk_score, compare_result.summary)
         self.snapshot_store.connection.execute(
             "UPDATE repo_snapshots SET summary = ? WHERE id = ?",
             (snapshot.summary, snapshot.id),
         )
         self.snapshot_store.connection.commit()
+        self._progress(progress_callback, "Finalizing snapshot", 100)
         return ScanResult(
             snapshot=snapshot,
             findings=findings,
@@ -326,15 +343,13 @@ class ScanOrchestrator:
                 )
             )
 
-    def _provider(self) -> GeminiProvider | None:
-        if not self.settings.gemini_api_key:
-            return None
-        return GeminiProvider(
-            api_key=self.settings.gemini_api_key,
-            model_name=self.settings.gemini_model,
-            timeout_seconds=self.settings.llm_timeout_seconds,
-            retry_count=self.settings.llm_retry_count,
-        )
+    def _provider(self) -> ProviderBase | None:
+        return create_provider(self.settings)
+
+    @staticmethod
+    def _progress(progress_callback: Callable[[str, int], None] | None, stage: str, progress: int) -> None:
+        if progress_callback:
+            progress_callback(stage, progress)
 
     @staticmethod
     def _fingerprint(item) -> str:

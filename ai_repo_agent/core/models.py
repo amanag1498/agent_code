@@ -220,7 +220,7 @@ class ScanResult:
 
 
 class FindingReview(BaseModel):
-    """Structured Gemini review for an individual finding."""
+    """Structured LLM review for an individual finding."""
 
     verdict: Verdict
     confidence: float = Field(ge=0.0, le=1.0)
@@ -233,7 +233,7 @@ class FindingReview(BaseModel):
 
 
 class DiffReview(BaseModel):
-    """Structured Gemini review for changed code."""
+    """Structured LLM review for changed code."""
 
     confidence: float = Field(ge=0.0, le=1.0)
     risk_increased: bool
@@ -244,7 +244,7 @@ class DiffReview(BaseModel):
 
 
 class RepoReview(BaseModel):
-    """Structured Gemini review for repo-level prioritization."""
+    """Structured LLM review for repo-level prioritization."""
 
     confidence: float = Field(ge=0.0, le=1.0)
     top_risks: list[str]
@@ -254,7 +254,7 @@ class RepoReview(BaseModel):
 
 
 class GeneratedFinding(BaseModel):
-    """Structured Gemini-generated finding."""
+    """Structured LLM-generated finding."""
 
     rule_id: str
     title: str
@@ -275,7 +275,7 @@ class GeneratedFinding(BaseModel):
 
 
 class FindingBatch(BaseModel):
-    """Structured Gemini-generated batch of findings."""
+    """Structured LLM-generated batch of findings."""
 
     findings: list[GeneratedFinding]
 
@@ -349,8 +349,10 @@ class PatchSuggestionRecord:
 @dataclass(slots=True)
 class AppSettings:
     database_path: str = "ai_repo_analyst.db"
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash"
+    llm_provider: str = "gemini"
+    llm_api_key: str = ""
+    llm_model: str = "gemini-2.5-flash"
+    llm_base_url: str = ""
     llm_timeout_seconds: int = 60
     llm_retry_count: int = 2
     llm_max_findings_per_scan: int = 20

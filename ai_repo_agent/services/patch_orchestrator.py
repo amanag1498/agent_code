@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from ai_repo_agent.db.repositories import EmbeddingStore, FindingStore, PatchSuggestionStore, ReviewStore
-from ai_repo_agent.llm.gemini_provider import GeminiProvider
+from ai_repo_agent.llm.provider import ProviderBase
 from ai_repo_agent.llm.workflows import PatchSuggestionLLMService
 
 LOGGER = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ class PatchOrchestrator:
         embedding_store: EmbeddingStore,
         review_store: ReviewStore,
         patch_store: PatchSuggestionStore,
-        provider: GeminiProvider | None,
+        provider: ProviderBase | None,
     ) -> None:
         self.finding_store = finding_store
         self.embedding_store = embedding_store
@@ -31,7 +31,7 @@ class PatchOrchestrator:
 
     def suggest(self, repo_root: str, snapshot_id: int, finding_id: int) -> str:
         if not self.provider:
-            return "Gemini is not configured. Add an API key in Settings to generate patch suggestions."
+            return "No LLM provider is configured. Update the LLM settings to generate patch suggestions."
         findings = self.finding_store.list_for_snapshot(snapshot_id)
         finding = next((item for item in findings if item.id == finding_id), None)
         if not finding:

@@ -9,7 +9,7 @@ from threading import Lock
 
 
 class InMemoryLogHandler(logging.Handler):
-    """Thread-safe in-memory log buffer for the desktop UI."""
+    """Thread-safe in-memory log buffer for the local UI."""
 
     def __init__(self, max_entries: int = 500) -> None:
         super().__init__()

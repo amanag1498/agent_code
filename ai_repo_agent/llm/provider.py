@@ -13,6 +13,9 @@ TModel = TypeVar("TModel", bound=BaseModel)
 class ProviderBase(abc.ABC):
     """Base provider for structured LLM calls."""
 
+    provider_name: str = "unknown"
+    model_name: str = "unknown"
+
     @abc.abstractmethod
     def generate_structured(self, prompt: str, response_model: type[TModel]) -> TModel:
         """Generate a structured response for a prompt."""

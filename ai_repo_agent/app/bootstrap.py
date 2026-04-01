@@ -1,19 +1,17 @@
-"""Bootstrap the desktop application."""
+"""Bootstrap the local web application."""
 
 from __future__ import annotations
 
-import sys
+import os
 
-from PySide6.QtWidgets import QApplication
+import uvicorn
 
-from ai_repo_agent.services.app_context import AppContext
-from ai_repo_agent.ui.main_window import MainWindow
+from ai_repo_agent.web.server import create_app
 
 
 def main() -> int:
-    """Run the desktop application."""
-    app = QApplication(sys.argv)
-    context = AppContext("ai_repo_analyst.db")
-    window = MainWindow(context)
-    window.show()
-    return app.exec()
+    """Run the local web application."""
+    host = os.getenv("AI_REPO_ANALYST_HOST", "127.0.0.1")
+    port = int(os.getenv("AI_REPO_ANALYST_PORT", "8000"))
+    uvicorn.run(create_app(), host=host, port=port, log_level="info")
+    return 0

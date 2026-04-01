@@ -24,7 +24,7 @@ from ai_repo_agent.db.repositories import (
 
 
 class AppContext:
-    """Service locator for the desktop app."""
+    """Service locator for the web app."""
 
     def __init__(self, database_path: str) -> None:
         configure_logging()
@@ -42,8 +42,10 @@ class AppContext:
         self.patches = PatchSuggestionStore(self.connection)
         self.settings = SettingsStore(self.connection)
         loaded = self.settings.load()
-        if not loaded.gemini_api_key:
-            loaded.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
-        loaded.gemini_model = os.getenv("GEMINI_MODEL", loaded.gemini_model)
+        loaded.llm_provider = os.getenv("LLM_PROVIDER", loaded.llm_provider)
+        if not loaded.llm_api_key:
+            loaded.llm_api_key = os.getenv("LLM_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+        loaded.llm_model = os.getenv("LLM_MODEL", os.getenv("GEMINI_MODEL", loaded.llm_model))
+        loaded.llm_base_url = os.getenv("LLM_BASE_URL", loaded.llm_base_url)
         set_logging_level(loaded.logging_level)
         self.settings.save(loaded)

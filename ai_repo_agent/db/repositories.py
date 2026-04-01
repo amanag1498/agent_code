@@ -37,7 +37,7 @@ class RepositoryStore(BaseRepository):
     """Persistence for tracked repositories."""
 
     def upsert(self, record: RepositoryRecord) -> RepositoryRecord:
-        cursor = self.connection.execute(
+        self.connection.execute(
             """
             INSERT INTO repositories(path, name, is_git_repo, fingerprint)
             VALUES (?, ?, ?, ?)
@@ -50,15 +50,20 @@ class RepositoryStore(BaseRepository):
             (record.path, record.name, int(record.is_git_repo), record.fingerprint),
         )
         self.connection.commit()
-        repo_id = cursor.lastrowid or self.connection.execute(
-            "SELECT id FROM repositories WHERE path = ?",
-            (record.path,),
-        ).fetchone()["id"]
-        return self.get_by_id(repo_id)
+        stored = self.get_by_path(record.path)
+        if stored is None:
+            raise RuntimeError(f"Repository upsert failed for path '{record.path}'.")
+        return stored
 
     def get_by_id(self, repo_id: int) -> RepositoryRecord:
         row = self.connection.execute("SELECT * FROM repositories WHERE id = ?", (repo_id,)).fetchone()
+        if row is None:
+            raise RuntimeError(f"Repository id '{repo_id}' was not found.")
         return RepositoryRecord(**dict(row))
+
+    def get_by_path(self, path: str) -> RepositoryRecord | None:
+        row = self.connection.execute("SELECT * FROM repositories WHERE path = ?", (path,)).fetchone()
+        return RepositoryRecord(**dict(row)) if row else None
 
     def list_all(self) -> list[RepositoryRecord]:
         rows = self.connection.execute("SELECT * FROM repositories ORDER BY updated_at DESC").fetchall()
@@ -124,7 +129,7 @@ class FileStore(BaseRepository):
     """Persistence for files and file versions."""
 
     def upsert_file(self, record: FileRecord) -> int:
-        cursor = self.connection.execute(
+        self.connection.execute(
             """
             INSERT INTO files(repo_id, path, size, sha256, language, is_binary)
             VALUES (?, ?, ?, ?, ?, ?)
@@ -137,12 +142,13 @@ class FileStore(BaseRepository):
             (record.repo_id, record.path, record.size, record.sha256, record.language, int(record.is_binary)),
         )
         self.connection.commit()
-        if cursor.lastrowid:
-            return int(cursor.lastrowid)
-        return int(self.connection.execute(
+        row = self.connection.execute(
             "SELECT id FROM files WHERE repo_id = ? AND path = ?",
             (record.repo_id, record.path),
-        ).fetchone()["id"])
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(f"File upsert failed for repo_id={record.repo_id} path='{record.path}'.")
+        return int(row["id"])
 
     def add_version(self, record: FileVersionRecord) -> None:
         self.connection.execute(
@@ -154,6 +160,34 @@ class FileStore(BaseRepository):
     def list_for_repo(self, repo_id: int) -> list[FileRecord]:
         rows = self.connection.execute("SELECT * FROM files WHERE repo_id = ? ORDER BY path", (repo_id,)).fetchall()
         return [FileRecord(**dict(row)) for row in rows]
+
+    def changed_paths_between_snapshots(self, previous_snapshot_id: int, current_snapshot_id: int) -> list[str]:
+        previous_rows = self.connection.execute(
+            """
+            SELECT f.path, fv.sha256
+            FROM file_versions fv
+            JOIN files f ON f.id = fv.file_id
+            WHERE fv.snapshot_id = ?
+            """,
+            (previous_snapshot_id,),
+        ).fetchall()
+        current_rows = self.connection.execute(
+            """
+            SELECT f.path, fv.sha256
+            FROM file_versions fv
+            JOIN files f ON f.id = fv.file_id
+            WHERE fv.snapshot_id = ?
+            """,
+            (current_snapshot_id,),
+        ).fetchall()
+        previous_map = {row["path"]: row["sha256"] for row in previous_rows}
+        current_map = {row["path"]: row["sha256"] for row in current_rows}
+        changed = {
+            path
+            for path in set(previous_map) | set(current_map)
+            if previous_map.get(path) != current_map.get(path)
+        }
+        return sorted(changed)
 
 
 class DependencyStore(BaseRepository):

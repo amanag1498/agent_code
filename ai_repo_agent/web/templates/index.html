@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AI Repo Analyst</title>
+    <link rel="stylesheet" href="/static/app.css">
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <p class="eyebrow">Local Memory + Structured LLM Review</p>
+          <h1>AI Repo Analyst</h1>
+          <p class="subtle">Repository intelligence, diff review, chat, and patch guidance in one local workspace.</p>
+        </div>
+
+        <section class="drop-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Command</p>
+              <h2>Scan Workspace</h2>
+            </div>
+            <div class="mini-badge">Local</div>
+          </div>
+          <form id="scan-form">
+            <label class="subtle" for="scan-path">Local folder or repo path</label>
+            <input id="scan-path" name="path" type="text" placeholder="/Users/you/project">
+            <div class="button-row">
+              <button type="submit">Scan Repo</button>
+              <button id="browse-folder-button" type="button" class="ghost">Browse Folder</button>
+              <button id="rescan-button" type="button" class="ghost">Rescan Current</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="recent-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">History</p>
+              <h2>Recent Repositories</h2>
+            </div>
+            <div class="mini-badge subtle-badge">SQLite</div>
+          </div>
+          <div id="repo-list" class="repo-list"></div>
+        </section>
+
+        <nav class="nav" id="nav">
+          <button data-page="overview" class="nav-item active">Overview</button>
+          <button data-page="tree" class="nav-item">Repo Tree</button>
+          <button data-page="findings" class="nav-item">Findings</button>
+          <button data-page="compare" class="nav-item">Compare</button>
+          <button data-page="memory" class="nav-item">Memory</button>
+          <button data-page="chat" class="nav-item">Repo Chat</button>
+          <button data-page="patch" class="nav-item">Patch Lab</button>
+          <button data-page="logs" class="nav-item">Logs</button>
+          <button data-page="settings" class="nav-item">Settings</button>
+        </nav>
+
+        <section class="sidebar-note">
+          <p class="eyebrow">Mode</p>
+          <p class="subtle">Local-first analysis with grounded LLM review and live scan telemetry.</p>
+        </section>
+      </aside>
+
+      <main class="main">
+        <header class="workspace-bar">
+          <div class="workspace-copy">
+            <p class="eyebrow">Workspace</p>
+            <h2 id="hero-title">No repository loaded</h2>
+            <p id="hero-meta" class="subtle">Scan a local repository to start analysis.</p>
+          </div>
+          <div class="workspace-pills">
+            <span class="workspace-pill">Repo Memory</span>
+            <span class="workspace-pill">Risk Review</span>
+            <span class="workspace-pill">Live Scan</span>
+          </div>
+        </header>
+
+        <header class="hero">
+          <div class="stats">
+            <article class="stat-card">
+              <span class="stat-label">Findings</span>
+              <strong id="stat-findings">0</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Risk</span>
+              <strong id="stat-risk">n/a</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Changes</span>
+              <strong id="stat-changes">0</strong>
+            </article>
+            <article class="stat-card">
+              <span class="stat-label">Memory</span>
+              <strong id="stat-memory">0</strong>
+            </article>
+          </div>
+        </header>
+
+        <section class="scan-hud" id="scan-hud">
+          <article class="panel scan-panel">
+            <div class="inline-head">
+              <div>
+                <p class="eyebrow">Live Activity</p>
+                <h3 id="scan-stage">Idle</h3>
+              </div>
+              <div id="scan-badge" class="scan-badge idle">Ready</div>
+            </div>
+            <div class="scan-progress-shell">
+              <div id="scan-progress-bar" class="scan-progress-bar"></div>
+            </div>
+            <div class="scan-meta-row">
+              <div id="scan-status-text" class="subtle">No scan in progress.</div>
+              <div id="scan-percent" class="scan-percent">0%</div>
+            </div>
+            <div id="scan-activity" class="scan-activity">
+              <div class="activity-item">
+                <span class="activity-dot"></span>
+                <span>Waiting for the next repository scan.</span>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section id="page-overview" class="page active">
+          <div class="panel-grid hero-grid">
+            <article class="panel spotlight-panel">
+              <div class="inline-head">
+                <div>
+                  <p class="eyebrow">Repository Map</p>
+                  <h3>Architecture Signal Graph</h3>
+                </div>
+                <div id="graph-summary" class="subtle">Awaiting scan data.</div>
+              </div>
+              <svg id="repo-graph" class="repo-graph" viewBox="0 0 900 300" preserveAspectRatio="xMidYMid meet"></svg>
+            </article>
+            <article class="panel signal-panel">
+              <p class="eyebrow">Signal Bands</p>
+              <div id="signal-bands" class="signal-bands"></div>
+            </article>
+          </div>
+          <div class="panel-grid two">
+            <article class="panel">
+              <h3>Repository Overview</h3>
+              <pre id="overview-repo"></pre>
+            </article>
+            <article class="panel">
+              <h3>Scan Summary</h3>
+              <pre id="overview-summary"></pre>
+            </article>
+          </div>
+          <div class="panel-grid two">
+            <article class="panel">
+              <h3>Execution History</h3>
+              <pre id="overview-runs"></pre>
+            </article>
+            <article class="panel">
+              <h3>Release Readiness</h3>
+              <pre id="overview-health"></pre>
+            </article>
+          </div>
+          <div class="panel-grid two">
+            <article class="panel">
+              <h3>Languages & Frameworks</h3>
+              <pre id="overview-languages"></pre>
+            </article>
+            <article class="panel">
+              <h3>Top Findings</h3>
+              <pre id="overview-top-findings"></pre>
+            </article>
+          </div>
+        </section>
+
+        <section id="page-tree" class="page">
+          <div class="panel-grid tree-layout">
+            <article class="panel">
+              <div class="inline-head">
+                <h3>Repository Tree</h3>
+                <input id="tree-filter" type="text" placeholder="Filter files or folders">
+              </div>
+              <div id="tree-summary" class="subtle">No repository loaded.</div>
+              <div id="tree-breadcrumb" class="tree-breadcrumb">No node selected.</div>
+              <div id="tree-view" class="tree-view"></div>
+            </article>
+            <div class="panel-stack">
+              <article class="panel">
+                <h3>File Detail</h3>
+                <pre id="file-detail">Select a file or folder.</pre>
+              </article>
+              <article class="panel">
+                <h3>File Preview</h3>
+                <pre id="file-preview">Select a text file to preview its contents.</pre>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="page-findings" class="page">
+          <article class="panel">
+            <div class="inline-head">
+              <h3>Findings</h3>
+              <div class="filters">
+                <select id="filter-severity"></select>
+                <select id="filter-category"></select>
+                <select id="filter-source"></select>
+              </div>
+            </div>
+            <div id="finding-kpis" class="finding-kpis"></div>
+            <div class="panel-grid findings-layout">
+              <div class="table-wrap">
+                <table class="data-table" id="findings-table">
+                  <thead>
+                    <tr>
+                      <th>Severity</th>
+                      <th>Source</th>
+                      <th>Category</th>
+                      <th>Title</th>
+                      <th>File</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <pre id="finding-detail">Select a finding to inspect its structured LLM judgment.</pre>
+            </div>
+          </article>
+        </section>
+
+        <section id="page-compare" class="page">
+          <div class="stats compare-stats">
+            <article class="stat-card"><span class="stat-label">New</span><strong id="compare-new">0</strong></article>
+            <article class="stat-card"><span class="stat-label">Fixed</span><strong id="compare-fixed">0</strong></article>
+            <article class="stat-card"><span class="stat-label">Unchanged</span><strong id="compare-unchanged">0</strong></article>
+            <article class="stat-card"><span class="stat-label">Dependency Delta</span><strong id="compare-deps">0</strong></article>
+          </div>
+          <div id="compare-insights" class="compare-insights"></div>
+          <div class="panel-grid two">
+            <article class="panel">
+              <h3>Comparison Summary</h3>
+              <pre id="compare-summary">No prior snapshot available.</pre>
+            </article>
+            <article class="panel">
+              <h3>Changed Files</h3>
+              <div id="compare-files" class="list-grid"></div>
+              <h3>Changed Dependencies</h3>
+              <div id="compare-dependency-list" class="list-grid"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="page-memory" class="page">
+          <div class="panel-grid memory-layout">
+            <article class="panel">
+              <h3>Snapshot Timeline</h3>
+              <div id="memory-timeline" class="repo-list"></div>
+            </article>
+            <article class="panel">
+              <h3>Snapshot Memory</h3>
+              <pre id="memory-detail"></pre>
+            </article>
+            <article class="panel">
+              <h3>Symbols</h3>
+              <pre id="memory-symbols"></pre>
+            </article>
+            <article class="panel">
+              <h3>Chunks</h3>
+              <pre id="memory-chunks"></pre>
+            </article>
+          </div>
+          <article class="panel">
+            <div class="inline-head">
+              <h3>Memory Constellation</h3>
+              <div id="memory-constellation-summary" class="subtle">Awaiting scan data.</div>
+            </div>
+            <svg id="memory-constellation" class="repo-graph constellation" viewBox="0 0 900 240" preserveAspectRatio="xMidYMid meet"></svg>
+          </article>
+        </section>
+
+        <section id="page-chat" class="page">
+          <article class="panel">
+            <div class="inline-head">
+              <h3>Repository Chat</h3>
+            </div>
+            <div id="chat-output" class="chat-log"></div>
+            <div class="chat-compose">
+              <textarea id="chat-question" placeholder="Ask about risk, architecture, auth flows, dependencies, or changed code..."></textarea>
+              <button id="chat-send">Send Question</button>
+            </div>
+          </article>
+        </section>
+
+        <section id="page-patch" class="page">
+          <article class="panel">
+            <div class="inline-head">
+              <h3>Patch Lab</h3>
+              <button id="patch-generate">Generate Patch For Selected Finding</button>
+            </div>
+            <p class="subtle">Select a finding first, then generate a conservative patch grounded in the local repository evidence.</p>
+            <pre id="patch-output">No patch suggestions yet.</pre>
+          </article>
+        </section>
+
+        <section id="page-logs" class="page">
+          <article class="panel">
+            <div class="inline-head">
+              <h3>Execution Logs</h3>
+              <button id="refresh-logs" class="ghost">Refresh</button>
+            </div>
+            <pre id="log-output"></pre>
+          </article>
+        </section>
+
+        <section id="page-settings" class="page">
+          <div class="panel-grid two">
+            <article class="panel">
+              <h3>Runtime Settings</h3>
+              <form id="settings-form" class="settings-form">
+                <label>LLM Provider
+                  <select id="settings-provider">
+                    <option value="gemini">Gemini</option>
+                    <option value="openai_compatible">OpenAI-Compatible</option>
+                    <option value="local">Local Placeholder</option>
+                    <option value="none">Disabled</option>
+                  </select>
+                </label>
+                <label>LLM API Key<input id="settings-api-key" type="password"></label>
+                <label>LLM Model<input id="settings-model" type="text"></label>
+                <label>LLM Base URL<input id="settings-base-url" type="text" placeholder="https://api.example.com/v1"></label>
+                <label>Timeout Seconds<input id="settings-timeout" type="number"></label>
+                <label>Retry Count<input id="settings-retries" type="number"></label>
+                <label>Max Findings Per Scan<input id="settings-max-findings" type="number"></label>
+                <label>Chunk Lines<input id="settings-chunk-lines" type="number"></label>
+                <label>Watch Mode
+                  <select id="settings-watch">
+                    <option value="false">Disabled</option>
+                    <option value="true">Enabled</option>
+                  </select>
+                </label>
+                <label>Logging Level
+                  <select id="settings-log-level">
+                    <option value="DEBUG">DEBUG</option>
+                    <option value="INFO">INFO</option>
+                    <option value="WARNING">WARNING</option>
+                    <option value="ERROR">ERROR</option>
+                  </select>
+                </label>
+                <div class="button-row">
+                  <button type="button" id="install-hook" class="ghost">Install Pre-Commit Hook</button>
+                  <button type="submit">Save Settings</button>
+                </div>
+              </form>
+            </article>
+            <article class="panel">
+              <h3>Reports & Notes</h3>
+              <p class="subtle">Export JSON, Markdown, or HTML reports from the current snapshot. You can run Gemini or any OpenAI-compatible endpoint through the same structured LLM interface.</p>
+              <div class="button-row">
+                <button id="report-json" class="ghost">Download JSON</button>
+                <button id="report-md" class="ghost">Download Markdown</button>
+                <button id="report-html" class="ghost">Download HTML</button>
+              </div>
+              <pre id="settings-notes">The current session stays attached to the already-open database until restart if you change database_path.</pre>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

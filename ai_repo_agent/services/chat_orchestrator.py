@@ -7,7 +7,7 @@ import logging
 
 from ai_repo_agent.core.models import ChatMessageRecord, ChatSessionRecord
 from ai_repo_agent.db.repositories import ChatStore, EmbeddingStore, ReviewStore
-from ai_repo_agent.llm.gemini_provider import GeminiProvider
+from ai_repo_agent.llm.provider import ProviderBase
 from ai_repo_agent.llm.workflows import RepoChatLLMService
 
 LOGGER = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ LOGGER = logging.getLogger(__name__)
 class ChatOrchestrator:
     """Persist chat sessions and answer questions from local repo memory."""
 
-    def __init__(self, chat_store: ChatStore, embedding_store: EmbeddingStore, review_store: ReviewStore, provider: GeminiProvider | None) -> None:
+    def __init__(self, chat_store: ChatStore, embedding_store: EmbeddingStore, review_store: ReviewStore, provider: ProviderBase | None) -> None:
         self.chat_store = chat_store
         self.embedding_store = embedding_store
         self.review_store = review_store
@@ -35,7 +35,7 @@ class ChatOrchestrator:
             ChatMessageRecord(id=None, session_id=session.id or 0, role="user", content=question, created_at=datetime.utcnow().isoformat(timespec="seconds"))
         )
         if not self.provider:
-            answer = "Gemini is not configured. Add an API key in Settings to enable repo chat."
+            answer = "No LLM provider is configured. Update the LLM settings to enable repo chat."
         else:
             history = [{"role": msg.role, "content": msg.content} for msg in self.chat_store.list_messages(session.id or 0)]
             chunks = self.embedding_store.list_for_snapshot(snapshot_id)
@@ -51,8 +51,8 @@ class ChatOrchestrator:
                 answer = response.answer
                 LOGGER.info("Repo chat completed successfully for repo_id=%s snapshot_id=%s", repo_id, snapshot_id)
             except Exception as exc:
-                LOGGER.warning("Repo chat Gemini request failed: %s", exc)
-                answer = f"Gemini chat request failed: {exc}"
+                LOGGER.warning("Repo chat LLM request failed: %s", exc)
+                answer = f"LLM chat request failed: {exc}"
         self.chat_store.add_message(
             ChatMessageRecord(id=None, session_id=session.id or 0, role="assistant", content=answer, created_at=datetime.utcnow().isoformat(timespec="seconds"))
         )

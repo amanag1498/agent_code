@@ -34,7 +34,7 @@ class JudgeService:
 
 
 class FindingValidator(JudgeService):
-    """Validate normalized findings with Gemini."""
+    """Validate normalized findings with the configured LLM provider."""
 
     def review(
         self,
