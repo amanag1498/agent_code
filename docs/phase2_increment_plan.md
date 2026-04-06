@@ -1,5 +1,25 @@
 # Phase 2 Increment Plan
 
+Status: partially implemented and extended.
+
+This document describes the first additive Phase 2 slice that introduced:
+
+- embedding vector persistence
+- vector-backed retrieval
+- deeper optional semantic enrichment
+- semantic compare summaries
+- trend metadata groundwork
+
+The codebase has moved beyond this exact increment and now also includes:
+
+- finding families
+- framework-aware finding passes
+- architectural drift summaries
+- patch alternatives and validation metadata
+- bounded scan workers
+- scan cancellation
+- snapshot retention trimming
+
 This increment focuses on the first Phase 2 slice while keeping the existing
 application runnable and compatible:
 
