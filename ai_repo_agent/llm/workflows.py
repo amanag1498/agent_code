@@ -71,7 +71,7 @@ class LLMFindingGenerator:
         aggregated: list[GeneratedFinding] = []
         evidence_hashes: list[str] = []
         seen: set[str] = set()
-        max_per_batch = max(3, min(6, self.max_findings))
+        max_per_batch = max(4, min(8, max(6, self.max_findings // 2)))
         prepared_batches: list[tuple[int, dict, str, FindingBatch | None]] = []
         for index, (evidence, evidence_hash, mode) in enumerate(combined_batches, start=1):
             prompt = (
@@ -209,8 +209,22 @@ class PatchSuggestionLLMService:
         self.evidence_builder = EvidenceBuilder()
         self.prompt_builder = PromptBuilder()
 
-    def suggest(self, repo_root: Path, finding: FindingRecord, related_chunks: list[EmbeddingChunkRecord], snapshot_id: int) -> PatchSuggestionRecord:
-        evidence, evidence_hash = self.evidence_builder.build_patch_evidence(repo_root, finding, related_chunks)
+    def suggest(
+        self,
+        repo_root: Path,
+        finding: FindingRecord,
+        related_chunks: list[EmbeddingChunkRecord],
+        related_symbols,
+        patch_context: dict,
+        snapshot_id: int,
+    ) -> PatchSuggestionRecord:
+        evidence, evidence_hash = self.evidence_builder.build_patch_evidence(
+            repo_root,
+            finding,
+            related_chunks,
+            related_symbols,
+            patch_context,
+        )
         cached = self.review_store.get_cache(evidence_hash)
         if cached:
             response = PatchSuggestion.model_validate(cached)

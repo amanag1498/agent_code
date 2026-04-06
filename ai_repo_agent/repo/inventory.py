@@ -32,7 +32,20 @@ TEXT_SUFFIX_LANGUAGE = {
     ".cpp": "cpp",
 }
 
-IGNORED_DIRS = {".git", ".hg", ".svn", "node_modules", ".venv", "__pycache__", ".idea", ".mypy_cache"}
+IGNORED_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    ".venv",
+    "__pycache__",
+    ".idea",
+    ".mypy_cache",
+    "dist",
+    "build",
+    "target",
+    "vendor",
+}
 
 
 class FileInventoryService:

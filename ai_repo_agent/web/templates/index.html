@@ -4,369 +4,540 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>AI Repo Analyst</title>
-    <link rel="stylesheet" href="/static/app.css">
+    <link rel="stylesheet" href="/static/app.css?v=atelier2">
   </head>
   <body>
-    <div class="shell">
-      <aside class="sidebar">
-        <div class="brand">
-          <p class="eyebrow">Local Memory + Structured LLM Review</p>
-          <h1>AI Repo Analyst</h1>
-          <p class="subtle">Repository intelligence, diff review, chat, and patch guidance in one local workspace.</p>
+    <div class="ambient-layer">
+      <div class="ambient-gradient ambient-a"></div>
+      <div class="ambient-gradient ambient-b"></div>
+      <div class="ambient-grid"></div>
+    </div>
+
+    <div class="studio-shell">
+      <aside class="command-rail">
+        <div class="rail-top">
+          <div class="brand-lockup">
+            <div class="brand-glyph">AR</div>
+            <div class="brand-copy">
+              <p class="eyebrow">AI Repo Analyst</p>
+              <h1>Review Studio</h1>
+              <p class="subcopy">Repo scanning, diff memory, finding review, and patch guidance in one local workspace.</p>
+            </div>
+          </div>
+
+          <section class="rail-panel scan-panel">
+            <div class="panel-topline">
+              <div>
+                <p class="eyebrow">Scan Control</p>
+                <h2>Run Repository Analysis</h2>
+              </div>
+              <span class="panel-chip">Local-first</span>
+            </div>
+            <form id="scan-form" class="scan-form-layout">
+              <label for="scan-path">Folder or repository path</label>
+              <input id="scan-path" name="path" type="text" placeholder="/Users/you/project">
+              <div class="stacked-actions">
+                <button type="submit">Scan Repository</button>
+                <button id="browse-folder-button" type="button" class="ghost">Browse Folder</button>
+                <button id="rescan-button" type="button" class="ghost">Rescan Current</button>
+              </div>
+            </form>
+          </section>
         </div>
 
-        <section class="drop-panel">
-          <div class="section-head">
+        <section class="rail-panel nav-panel">
+          <div class="panel-topline">
             <div>
-              <p class="eyebrow">Command</p>
-              <h2>Scan Workspace</h2>
+              <p class="eyebrow">Sections</p>
+              <h2>Workspace Views</h2>
             </div>
-            <div class="mini-badge">Local</div>
           </div>
-          <form id="scan-form">
-            <label class="subtle" for="scan-path">Local folder or repo path</label>
-            <input id="scan-path" name="path" type="text" placeholder="/Users/you/project">
-            <div class="button-row">
-              <button type="submit">Scan Repo</button>
-              <button id="browse-folder-button" type="button" class="ghost">Browse Folder</button>
-              <button id="rescan-button" type="button" class="ghost">Rescan Current</button>
-            </div>
-          </form>
+          <nav class="nav-list" id="nav">
+            <button data-page="overview" class="nav-item active"><span class="nav-order">01</span><span>Overview</span></button>
+            <button data-page="tree" class="nav-item"><span class="nav-order">02</span><span>Repo Tree</span></button>
+            <button data-page="findings" class="nav-item"><span class="nav-order">03</span><span>Findings</span></button>
+            <button data-page="compare" class="nav-item"><span class="nav-order">04</span><span>Compare</span></button>
+            <button data-page="memory" class="nav-item"><span class="nav-order">05</span><span>Memory</span></button>
+            <button data-page="chat" class="nav-item"><span class="nav-order">06</span><span>Repo Chat</span></button>
+            <button data-page="patch" class="nav-item"><span class="nav-order">07</span><span>Patch Lab</span></button>
+            <button data-page="logs" class="nav-item"><span class="nav-order">08</span><span>Logs</span></button>
+            <button data-page="settings" class="nav-item"><span class="nav-order">09</span><span>Settings</span></button>
+          </nav>
         </section>
 
-        <section class="recent-panel">
-          <div class="section-head">
+        <section class="rail-panel recent-panel">
+          <div class="panel-topline">
             <div>
-              <p class="eyebrow">History</p>
-              <h2>Recent Repositories</h2>
+              <p class="eyebrow">Recent</p>
+              <h2>Tracked Repositories</h2>
             </div>
-            <div class="mini-badge subtle-badge">SQLite</div>
+            <span class="panel-chip ghost-chip">SQLite</span>
           </div>
           <div id="repo-list" class="repo-list"></div>
         </section>
-
-        <nav class="nav" id="nav">
-          <button data-page="overview" class="nav-item active">Overview</button>
-          <button data-page="tree" class="nav-item">Repo Tree</button>
-          <button data-page="findings" class="nav-item">Findings</button>
-          <button data-page="compare" class="nav-item">Compare</button>
-          <button data-page="memory" class="nav-item">Memory</button>
-          <button data-page="chat" class="nav-item">Repo Chat</button>
-          <button data-page="patch" class="nav-item">Patch Lab</button>
-          <button data-page="logs" class="nav-item">Logs</button>
-          <button data-page="settings" class="nav-item">Settings</button>
-        </nav>
-
-        <section class="sidebar-note">
-          <p class="eyebrow">Mode</p>
-          <p class="subtle">Local-first analysis with grounded LLM review and live scan telemetry.</p>
-        </section>
       </aside>
 
-      <main class="main">
-        <header class="workspace-bar">
-          <div class="workspace-copy">
-            <p class="eyebrow">Workspace</p>
-            <h2 id="hero-title">No repository loaded</h2>
-            <p id="hero-meta" class="subtle">Scan a local repository to start analysis.</p>
+      <main class="studio-main">
+        <section class="summary-band">
+          <div class="hero-card">
+            <div class="hero-copy">
+              <p class="eyebrow">Current Workspace</p>
+              <h2 id="hero-title">No repository loaded</h2>
+              <p id="hero-meta" class="subcopy">Scan a local repository to populate findings, history, and compare data.</p>
+            </div>
+            <div class="hero-ribbon">
+              <span class="ribbon-chip">Persistent memory</span>
+              <span class="ribbon-chip">Structured findings</span>
+              <span class="ribbon-chip">Diff-aware review</span>
+            </div>
           </div>
-          <div class="workspace-pills">
-            <span class="workspace-pill">Repo Memory</span>
-            <span class="workspace-pill">Risk Review</span>
-            <span class="workspace-pill">Live Scan</span>
-          </div>
-        </header>
 
-        <header class="hero">
-          <div class="stats">
-            <article class="stat-card">
-              <span class="stat-label">Findings</span>
+          <div class="headline-metrics">
+            <article class="metric-card">
+              <span class="metric-label">Findings</span>
               <strong id="stat-findings">0</strong>
             </article>
-            <article class="stat-card">
-              <span class="stat-label">Risk</span>
+            <article class="metric-card">
+              <span class="metric-label">Risk</span>
               <strong id="stat-risk">n/a</strong>
             </article>
-            <article class="stat-card">
-              <span class="stat-label">Changes</span>
+            <article class="metric-card">
+              <span class="metric-label">Changes</span>
               <strong id="stat-changes">0</strong>
             </article>
-            <article class="stat-card">
-              <span class="stat-label">Memory</span>
+            <article class="metric-card">
+              <span class="metric-label">Memory</span>
               <strong id="stat-memory">0</strong>
             </article>
           </div>
-        </header>
+        </section>
 
-        <section class="scan-hud" id="scan-hud">
-          <article class="panel scan-panel">
-            <div class="inline-head">
-              <div>
-                <p class="eyebrow">Live Activity</p>
-                <h3 id="scan-stage">Idle</h3>
+        <section class="telemetry-dock" id="scan-hud">
+          <div class="telemetry-head">
+            <div>
+              <p class="eyebrow">Live Activity</p>
+              <h3 id="scan-stage">Idle</h3>
+            </div>
+            <span id="scan-badge" class="scan-badge idle">Ready</span>
+          </div>
+          <div class="telemetry-body">
+            <div class="telemetry-progress-column">
+              <div class="progress-rail">
+                <div id="scan-progress-bar" class="progress-fill"></div>
               </div>
-              <div id="scan-badge" class="scan-badge idle">Ready</div>
+              <div class="progress-copy">
+                <span id="scan-status-text">No scan in progress.</span>
+                <strong id="scan-percent">0%</strong>
+              </div>
             </div>
-            <div class="scan-progress-shell">
-              <div id="scan-progress-bar" class="scan-progress-bar"></div>
-            </div>
-            <div class="scan-meta-row">
-              <div id="scan-status-text" class="subtle">No scan in progress.</div>
-              <div id="scan-percent" class="scan-percent">0%</div>
-            </div>
-            <div id="scan-activity" class="scan-activity">
-              <div class="activity-item">
-                <span class="activity-dot"></span>
+            <div id="scan-activity" class="activity-stream">
+              <div class="activity-row">
+                <span class="activity-pulse"></span>
                 <span>Waiting for the next repository scan.</span>
               </div>
             </div>
-          </article>
+          </div>
         </section>
 
-        <section id="page-overview" class="page active">
-          <div class="panel-grid hero-grid">
-            <article class="panel spotlight-panel">
-              <div class="inline-head">
-                <div>
-                  <p class="eyebrow">Repository Map</p>
-                  <h3>Architecture Signal Graph</h3>
+        <div class="page-stack">
+          <section id="page-overview" class="page active">
+            <div class="page-header">
+              <div>
+                <p class="eyebrow">Overview</p>
+                <h3>Repository posture, executive summary, and scan readiness</h3>
+              </div>
+              <p class="page-note">Start here to understand the repository shape, the active risk posture, and the most important outputs before drilling into specific findings or diffs.</p>
+            </div>
+
+            <div class="overview-masthead">
+              <article class="surface overview-summary-surface">
+                <div class="surface-head">
+                  <div>
+                    <p class="eyebrow">Executive Summary</p>
+                    <h3>Current repository brief</h3>
+                  </div>
                 </div>
-                <div id="graph-summary" class="subtle">Awaiting scan data.</div>
-              </div>
-              <svg id="repo-graph" class="repo-graph" viewBox="0 0 900 300" preserveAspectRatio="xMidYMid meet"></svg>
-            </article>
-            <article class="panel signal-panel">
-              <p class="eyebrow">Signal Bands</p>
-              <div id="signal-bands" class="signal-bands"></div>
-            </article>
-          </div>
-          <div class="panel-grid two">
-            <article class="panel">
-              <h3>Repository Overview</h3>
-              <pre id="overview-repo"></pre>
-            </article>
-            <article class="panel">
-              <h3>Scan Summary</h3>
-              <pre id="overview-summary"></pre>
-            </article>
-          </div>
-          <div class="panel-grid two">
-            <article class="panel">
-              <h3>Execution History</h3>
-              <pre id="overview-runs"></pre>
-            </article>
-            <article class="panel">
-              <h3>Release Readiness</h3>
-              <pre id="overview-health"></pre>
-            </article>
-          </div>
-          <div class="panel-grid two">
-            <article class="panel">
-              <h3>Languages & Frameworks</h3>
-              <pre id="overview-languages"></pre>
-            </article>
-            <article class="panel">
-              <h3>Top Findings</h3>
-              <pre id="overview-top-findings"></pre>
-            </article>
-          </div>
-        </section>
-
-        <section id="page-tree" class="page">
-          <div class="panel-grid tree-layout">
-            <article class="panel">
-              <div class="inline-head">
-                <h3>Repository Tree</h3>
-                <input id="tree-filter" type="text" placeholder="Filter files or folders">
-              </div>
-              <div id="tree-summary" class="subtle">No repository loaded.</div>
-              <div id="tree-breadcrumb" class="tree-breadcrumb">No node selected.</div>
-              <div id="tree-view" class="tree-view"></div>
-            </article>
-            <div class="panel-stack">
-              <article class="panel">
-                <h3>File Detail</h3>
-                <pre id="file-detail">Select a file or folder.</pre>
+                <pre id="overview-summary"></pre>
               </article>
-              <article class="panel">
-                <h3>File Preview</h3>
-                <pre id="file-preview">Select a text file to preview its contents.</pre>
+              <article class="surface overview-health-surface">
+                <div class="surface-head">
+                  <div>
+                    <p class="eyebrow">Operational Health</p>
+                    <h3>Scan health and readiness</h3>
+                  </div>
+                </div>
+                <pre id="overview-health"></pre>
               </article>
             </div>
-          </div>
-        </section>
 
-        <section id="page-findings" class="page">
-          <article class="panel">
-            <div class="inline-head">
-              <h3>Findings</h3>
+            <div class="overview-grid">
+              <article class="surface hero-surface graph-surface">
+                <div class="surface-head">
+                  <div>
+                    <p class="eyebrow">Architecture</p>
+                    <h3>Signal graph</h3>
+                  </div>
+                  <div id="graph-summary" class="surface-note">Awaiting scan data.</div>
+                </div>
+                <svg id="repo-graph" class="repo-graph" viewBox="0 0 900 300" preserveAspectRatio="xMidYMid meet"></svg>
+              </article>
+
+              <div class="signal-column">
+                <article class="surface tone-surface">
+                  <div class="surface-head">
+                    <div>
+                      <p class="eyebrow">Signals</p>
+                      <h3>Risk bands</h3>
+                    </div>
+                  </div>
+                  <div id="signal-bands" class="signal-bands"></div>
+                </article>
+                <article class="surface tone-surface">
+                  <div class="surface-head">
+                    <div>
+                      <p class="eyebrow">Pressure</p>
+                      <h3>Risk pressure board</h3>
+                    </div>
+                  </div>
+                  <div id="overview-risk-board" class="signal-bands"></div>
+                </article>
+                <article class="surface tone-surface">
+                  <div class="surface-head">
+                    <div>
+                      <p class="eyebrow">History</p>
+                      <h3>Recent scan execution</h3>
+                    </div>
+                  </div>
+                  <pre id="overview-runs"></pre>
+                </article>
+              </div>
+            </div>
+
+            <div class="quad-grid">
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Repository</p><h3>Structure snapshot</h3></div></div>
+                <pre id="overview-repo"></pre>
+              </article>
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Languages</p><h3>Languages and frameworks</h3></div></div>
+                <pre id="overview-languages"></pre>
+              </article>
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Memory</p><h3>Stored symbol and chunk coverage</h3></div></div>
+                <pre id="overview-memory"></pre>
+              </article>
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Diff</p><h3>Change summary</h3></div></div>
+                <pre id="overview-diff"></pre>
+              </article>
+            </div>
+
+            <div class="quad-grid">
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Critical Paths</p><h3>Likely high-value zones</h3></div></div>
+                <pre id="overview-critical-paths"></pre>
+              </article>
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Scan Posture</p><h3>Scanner and review posture</h3></div></div>
+                <pre id="overview-scan-posture"></pre>
+              </article>
+            </div>
+
+            <article class="surface">
+              <div class="surface-head"><div><p class="eyebrow">Top findings</p><h3>High-priority issues</h3></div></div>
+              <pre id="overview-top-findings"></pre>
+            </article>
+          </section>
+
+          <section id="page-tree" class="page">
+            <div class="page-header">
+              <div>
+                <p class="eyebrow">Repo Tree</p>
+                <h3>Navigate files, folders, and previews</h3>
+              </div>
+              <p id="tree-summary" class="page-note">No repository loaded.</p>
+            </div>
+
+            <div class="tree-layout">
+              <article class="surface">
+                <div class="surface-head">
+                  <div><p class="eyebrow">Navigator</p><h3>Repository tree</h3></div>
+                  <input id="tree-filter" type="text" placeholder="Filter files or folders">
+                </div>
+                <div id="tree-breadcrumb" class="tree-breadcrumb">No node selected.</div>
+                <div id="tree-view" class="tree-view"></div>
+              </article>
+              <div class="inspector-column">
+                <article class="surface compact-surface">
+                  <div class="surface-head"><div><p class="eyebrow">Metadata</p><h3>File detail</h3></div></div>
+                  <pre id="file-detail">Select a file or folder.</pre>
+                </article>
+                <article class="surface preview-surface">
+                  <div class="surface-head"><div><p class="eyebrow">Preview</p><h3>File contents</h3></div></div>
+                  <pre id="file-preview">Select a text file to preview its contents.</pre>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <section id="page-findings" class="page">
+            <div class="page-header findings-header">
+              <div>
+                <p class="eyebrow">Findings</p>
+                <h3>Review and prioritize structured issues</h3>
+              </div>
               <div class="filters">
                 <select id="filter-severity"></select>
                 <select id="filter-category"></select>
                 <select id="filter-source"></select>
               </div>
             </div>
+
             <div id="finding-kpis" class="finding-kpis"></div>
-            <div class="panel-grid findings-layout">
-              <div class="table-wrap">
-                <table class="data-table" id="findings-table">
-                  <thead>
-                    <tr>
-                      <th>Severity</th>
-                      <th>Source</th>
-                      <th>Category</th>
-                      <th>Title</th>
-                      <th>File</th>
-                      <th>Status</th>
-                    </tr>
-                  </thead>
-                  <tbody></tbody>
-                </table>
+
+            <div class="findings-layout">
+              <article class="surface queue-surface">
+                <div class="surface-head"><div><p class="eyebrow">Queue</p><h3>Finding list</h3></div></div>
+                <div class="table-wrap findings-table-wrap">
+                  <table class="data-table" id="findings-table">
+                    <thead>
+                      <tr>
+                        <th>Severity</th>
+                        <th>Source</th>
+                        <th>Category</th>
+                        <th>Title</th>
+                        <th>File</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
+              </article>
+              <article class="surface detail-surface">
+                <div class="surface-head"><div><p class="eyebrow">Inspection</p><h3>Finding detail and judgment</h3></div></div>
+                <pre id="finding-detail">Select a finding to inspect its structured LLM judgment.</pre>
+              </article>
+            </div>
+          </section>
+
+          <section id="page-compare" class="page">
+            <div class="page-header">
+              <div>
+                <p class="eyebrow">Compare</p>
+                <h3>Analyze change-driven risk between snapshots</h3>
               </div>
-              <pre id="finding-detail">Select a finding to inspect its structured LLM judgment.</pre>
+              <p class="page-note">Track regressions, fixes, structural drift, and dependency churn in one view.</p>
             </div>
-          </article>
-        </section>
 
-        <section id="page-compare" class="page">
-          <div class="stats compare-stats">
-            <article class="stat-card"><span class="stat-label">New</span><strong id="compare-new">0</strong></article>
-            <article class="stat-card"><span class="stat-label">Fixed</span><strong id="compare-fixed">0</strong></article>
-            <article class="stat-card"><span class="stat-label">Unchanged</span><strong id="compare-unchanged">0</strong></article>
-            <article class="stat-card"><span class="stat-label">Dependency Delta</span><strong id="compare-deps">0</strong></article>
-          </div>
-          <div id="compare-insights" class="compare-insights"></div>
-          <div class="panel-grid two">
-            <article class="panel">
-              <h3>Comparison Summary</h3>
-              <pre id="compare-summary">No prior snapshot available.</pre>
-            </article>
-            <article class="panel">
-              <h3>Changed Files</h3>
-              <div id="compare-files" class="list-grid"></div>
-              <h3>Changed Dependencies</h3>
-              <div id="compare-dependency-list" class="list-grid"></div>
-            </article>
-          </div>
-        </section>
-
-        <section id="page-memory" class="page">
-          <div class="panel-grid memory-layout">
-            <article class="panel">
-              <h3>Snapshot Timeline</h3>
-              <div id="memory-timeline" class="repo-list"></div>
-            </article>
-            <article class="panel">
-              <h3>Snapshot Memory</h3>
-              <pre id="memory-detail"></pre>
-            </article>
-            <article class="panel">
-              <h3>Symbols</h3>
-              <pre id="memory-symbols"></pre>
-            </article>
-            <article class="panel">
-              <h3>Chunks</h3>
-              <pre id="memory-chunks"></pre>
-            </article>
-          </div>
-          <article class="panel">
-            <div class="inline-head">
-              <h3>Memory Constellation</h3>
-              <div id="memory-constellation-summary" class="subtle">Awaiting scan data.</div>
+            <div class="compare-stat-grid">
+              <article class="metric-card soft-metric"><span class="metric-label">New</span><strong id="compare-new">0</strong></article>
+              <article class="metric-card soft-metric"><span class="metric-label">Fixed</span><strong id="compare-fixed">0</strong></article>
+              <article class="metric-card soft-metric"><span class="metric-label">Unchanged</span><strong id="compare-unchanged">0</strong></article>
+              <article class="metric-card soft-metric"><span class="metric-label">Dependency Delta</span><strong id="compare-deps">0</strong></article>
             </div>
-            <svg id="memory-constellation" class="repo-graph constellation" viewBox="0 0 900 240" preserveAspectRatio="xMidYMid meet"></svg>
-          </article>
-        </section>
 
-        <section id="page-chat" class="page">
-          <article class="panel">
-            <div class="inline-head">
-              <h3>Repository Chat</h3>
-            </div>
-            <div id="chat-output" class="chat-log"></div>
-            <div class="chat-compose">
-              <textarea id="chat-question" placeholder="Ask about risk, architecture, auth flows, dependencies, or changed code..."></textarea>
-              <button id="chat-send">Send Question</button>
-            </div>
-          </article>
-        </section>
+            <div id="compare-insights" class="compare-insights"></div>
 
-        <section id="page-patch" class="page">
-          <article class="panel">
-            <div class="inline-head">
-              <h3>Patch Lab</h3>
+            <div class="compare-layout">
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Summary</p><h3>Comparison summary</h3></div></div>
+                <pre id="compare-summary">No prior snapshot available.</pre>
+              </article>
+              <div class="inspector-column">
+                <article class="surface compact-surface">
+                  <div class="surface-head"><div><p class="eyebrow">Actionable Deltas</p><h3>Select a changed finding for Patch Lab</h3></div></div>
+                  <div id="compare-deltas" class="list-grid"></div>
+                </article>
+                <article class="surface compact-surface">
+                  <div class="surface-head"><div><p class="eyebrow">Files</p><h3>Changed files</h3></div></div>
+                  <div id="compare-files" class="list-grid"></div>
+                </article>
+                <article class="surface compact-surface">
+                  <div class="surface-head"><div><p class="eyebrow">Dependencies</p><h3>Changed dependencies</h3></div></div>
+                  <div id="compare-dependency-list" class="list-grid"></div>
+                </article>
+              </div>
+            </div>
+          </section>
+
+          <section id="page-memory" class="page">
+            <div class="page-header">
+              <div>
+                <p class="eyebrow">Memory</p>
+                <h3>Inspect snapshots, symbols, and chunk memory</h3>
+              </div>
+              <p id="memory-constellation-summary" class="page-note">Awaiting scan data.</p>
+            </div>
+
+            <div class="memory-layout">
+              <article class="surface timeline-surface">
+                <div class="surface-head"><div><p class="eyebrow">Timeline</p><h3>Snapshot history</h3></div></div>
+                <div id="memory-timeline" class="repo-list"></div>
+              </article>
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Snapshot</p><h3>Snapshot detail</h3></div></div>
+                <pre id="memory-detail"></pre>
+              </article>
+              <article class="surface compact-surface">
+                <div class="surface-head"><div><p class="eyebrow">Symbols</p><h3>Indexed symbols</h3></div></div>
+                <pre id="memory-symbols"></pre>
+              </article>
+              <article class="surface compact-surface">
+                <div class="surface-head"><div><p class="eyebrow">Chunks</p><h3>Chunk memory</h3></div></div>
+                <pre id="memory-chunks"></pre>
+              </article>
+            </div>
+
+            <article class="surface">
+              <div class="surface-head"><div><p class="eyebrow">Topology</p><h3>Memory constellation</h3></div></div>
+              <svg id="memory-constellation" class="repo-graph constellation" viewBox="0 0 900 240" preserveAspectRatio="xMidYMid meet"></svg>
+            </article>
+          </section>
+
+          <section id="page-chat" class="page">
+            <div class="page-header">
+              <div>
+                <p class="eyebrow">Repo Chat</p>
+                <h3>Ask grounded questions against repository memory</h3>
+              </div>
+              <p class="page-note">Use this for architecture, risk, auth flows, dependencies, and changed-code questions.</p>
+            </div>
+
+            <div class="chat-layout">
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Conversation</p><h3>Repository chat</h3></div></div>
+                <div id="chat-output" class="chat-log"></div>
+              </article>
+              <article class="surface compact-surface">
+                <div class="surface-head"><div><p class="eyebrow">Compose</p><h3>Ask a question</h3></div></div>
+                <div class="chat-compose">
+                  <textarea id="chat-question" placeholder="Ask about auth paths, dependencies, risks, or changed code..."></textarea>
+                  <button id="chat-send">Send Question</button>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section id="page-patch" class="page">
+            <div class="page-header">
+              <div>
+                <p class="eyebrow">Patch Lab</p>
+                <h3>Generate remediation guidance from Compare selection</h3>
+              </div>
               <button id="patch-generate">Generate Patch For Selected Finding</button>
             </div>
-            <p class="subtle">Select a finding first, then generate a conservative patch grounded in the local repository evidence.</p>
-            <pre id="patch-output">No patch suggestions yet.</pre>
-          </article>
-        </section>
 
-        <section id="page-logs" class="page">
-          <article class="panel">
-            <div class="inline-head">
-              <h3>Execution Logs</h3>
+            <div class="patch-layout">
+              <article class="surface compact-surface accent-surface">
+                <div class="surface-head"><div><p class="eyebrow">Selected Delta</p><h3>Patch target from Compare</h3></div></div>
+                <pre id="patch-selection">Select a new or regressed finding from the Compare page to enable Patch Lab.</pre>
+              </article>
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Output</p><h3>Patch suggestion</h3></div></div>
+                <pre id="patch-output">No patch suggestions yet.</pre>
+              </article>
+            </div>
+          </section>
+
+          <section id="page-logs" class="page">
+            <div class="page-header">
+              <div>
+                <p class="eyebrow">Logs</p>
+                <h3>Observe runtime activity and failures</h3>
+              </div>
               <button id="refresh-logs" class="ghost">Refresh</button>
             </div>
-            <pre id="log-output"></pre>
-          </article>
-        </section>
 
-        <section id="page-settings" class="page">
-          <div class="panel-grid two">
-            <article class="panel">
-              <h3>Runtime Settings</h3>
-              <form id="settings-form" class="settings-form">
-                <label>LLM Provider
-                  <select id="settings-provider">
-                    <option value="gemini">Gemini</option>
-                    <option value="openai_compatible">OpenAI-Compatible</option>
-                    <option value="local">Local Placeholder</option>
-                    <option value="none">Disabled</option>
-                  </select>
-                </label>
-                <label>LLM API Key<input id="settings-api-key" type="password"></label>
-                <label>LLM Model<input id="settings-model" type="text"></label>
-                <label>LLM Base URL<input id="settings-base-url" type="text" placeholder="https://api.example.com/v1"></label>
-                <label>Timeout Seconds<input id="settings-timeout" type="number"></label>
-                <label>Retry Count<input id="settings-retries" type="number"></label>
-                <label>Max Findings Per Scan<input id="settings-max-findings" type="number"></label>
-                <label>Chunk Lines<input id="settings-chunk-lines" type="number"></label>
-                <label>Watch Mode
-                  <select id="settings-watch">
-                    <option value="false">Disabled</option>
-                    <option value="true">Enabled</option>
-                  </select>
-                </label>
-                <label>Logging Level
-                  <select id="settings-log-level">
-                    <option value="DEBUG">DEBUG</option>
-                    <option value="INFO">INFO</option>
-                    <option value="WARNING">WARNING</option>
-                    <option value="ERROR">ERROR</option>
-                  </select>
-                </label>
-                <div class="button-row">
-                  <button type="button" id="install-hook" class="ghost">Install Pre-Commit Hook</button>
-                  <button type="submit">Save Settings</button>
-                </div>
-              </form>
+            <article class="surface logs-surface accent-surface">
+              <div class="surface-head"><div><p class="eyebrow">Telemetry</p><h3>Execution logs</h3></div></div>
+              <pre id="log-output"></pre>
             </article>
-            <article class="panel">
-              <h3>Reports & Notes</h3>
-              <p class="subtle">Export JSON, Markdown, or HTML reports from the current snapshot. You can run Gemini or any OpenAI-compatible endpoint through the same structured LLM interface.</p>
-              <div class="button-row">
-                <button id="report-json" class="ghost">Download JSON</button>
-                <button id="report-md" class="ghost">Download Markdown</button>
-                <button id="report-html" class="ghost">Download HTML</button>
+          </section>
+
+          <section id="page-settings" class="page">
+            <div class="page-header">
+              <div>
+                <p class="eyebrow">Settings</p>
+                <h3>Configure providers, analyzers, and runtime behavior</h3>
               </div>
-              <pre id="settings-notes">The current session stays attached to the already-open database until restart if you change database_path.</pre>
-            </article>
-          </div>
-        </section>
+              <p class="page-note">Provider changes affect the current runtime after save. Database path changes apply on restart.</p>
+            </div>
+
+            <div class="settings-layout">
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Runtime</p><h3>Core settings</h3></div></div>
+                <form id="settings-form" class="settings-form settings-grid">
+                  <label>LLM Provider
+                    <select id="settings-provider">
+                      <option value="gemini">Gemini</option>
+                      <option value="openrouter">OpenRouter</option>
+                      <option value="openai_compatible">OpenAI-Compatible</option>
+                      <option value="local">Local Placeholder</option>
+                      <option value="none">Disabled</option>
+                    </select>
+                  </label>
+                  <label>LLM API Key<input id="settings-api-key" type="password"></label>
+                  <label>LLM Model<input id="settings-model" type="text"></label>
+                  <label>LLM Base URL<input id="settings-base-url" type="text" placeholder="https://openrouter.ai/api/v1"></label>
+                  <label>Analyzer Backend
+                    <select id="settings-analyzer-backend">
+                      <option value="hybrid">Hybrid (Tree-sitter + LSP)</option>
+                      <option value="treesitter">Tree-sitter Only</option>
+                      <option value="legacy_ast">Legacy AST Fallback</option>
+                    </select>
+                  </label>
+                  <label>LSP Enrichment
+                    <select id="settings-lsp-enabled">
+                      <option value="true">Enabled</option>
+                      <option value="false">Disabled</option>
+                    </select>
+                  </label>
+                  <label>Timeout Seconds<input id="settings-timeout" type="number"></label>
+                  <label>Retry Count<input id="settings-retries" type="number"></label>
+                  <label>Max Findings Per Scan<input id="settings-max-findings" type="number"></label>
+                  <label>Chunk Lines<input id="settings-chunk-lines" type="number"></label>
+                  <label>Watch Mode
+                    <select id="settings-watch">
+                      <option value="false">Disabled</option>
+                      <option value="true">Enabled</option>
+                    </select>
+                  </label>
+                  <label>Logging Level
+                    <select id="settings-log-level">
+                      <option value="DEBUG">DEBUG</option>
+                      <option value="INFO">INFO</option>
+                      <option value="WARNING">WARNING</option>
+                      <option value="ERROR">ERROR</option>
+                    </select>
+                  </label>
+                  <div class="settings-actions stretch-actions">
+                    <button type="button" id="install-hook" class="ghost">Install Pre-Commit Hook</button>
+                    <button type="submit">Save Settings</button>
+                  </div>
+                </form>
+              </article>
+              <div class="inspector-column">
+                <article class="surface compact-surface">
+                  <div class="surface-head"><div><p class="eyebrow">Reports</p><h3>Export current snapshot</h3></div></div>
+                  <p class="page-note">Generate JSON, Markdown, or HTML reports from the loaded snapshot.</p>
+                  <div class="stacked-actions">
+                    <button id="report-json" class="ghost">Download JSON</button>
+                    <button id="report-md" class="ghost">Download Markdown</button>
+                    <button id="report-html" class="ghost">Download HTML</button>
+                  </div>
+                </article>
+                <article class="surface compact-surface accent-surface">
+                  <div class="surface-head"><div><p class="eyebrow">Notes</p><h3>Session notes</h3></div></div>
+                  <pre id="settings-notes">The current session stays attached to the already-open database until restart if you change database_path.</pre>
+                </article>
+              </div>
+            </div>
+          </section>
+        </div>
       </main>
     </div>
 
-    <script src="/static/app.js" defer></script>
+    <script src="/static/app.js?v=atelier2" defer></script>
   </body>
 </html>

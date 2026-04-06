@@ -59,6 +59,8 @@ class SettingsRequest(BaseModel):
     llm_api_key: str
     llm_model: str
     llm_base_url: str
+    analyzer_backend: str
+    lsp_enabled: bool
     llm_timeout_seconds: int
     llm_retry_count: int
     llm_max_findings_per_scan: int
@@ -167,7 +169,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/repositories/{repo_id}/compare")
     async def repo_compare(repo_id: int) -> JSONResponse:
-        compare = CompareOrchestrator(context.snapshots, context.findings, context.dependencies, context.files).compare_latest(repo_id)
+        compare = CompareOrchestrator(context.snapshots, context.findings, context.dependencies, context.files, context.symbols).compare_latest(repo_id)
         return JSONResponse({"compare": _serialize(compare) if compare else None})
 
     @app.get("/api/repositories/{repo_id}/tree")
@@ -175,7 +177,7 @@ def create_app() -> FastAPI:
         latest = context.snapshots.latest_for_repo(repo_id)
         if not latest:
             raise HTTPException(status_code=404, detail="No snapshot available.")
-        compare = CompareOrchestrator(context.snapshots, context.findings, context.dependencies, context.files).compare_latest(repo_id)
+        compare = CompareOrchestrator(context.snapshots, context.findings, context.dependencies, context.files, context.symbols).compare_latest(repo_id)
         files = context.files.list_for_repo(repo_id)
         return JSONResponse(
             {
@@ -209,20 +211,25 @@ def create_app() -> FastAPI:
         patch = PatchOrchestrator(
             context.findings,
             context.embeddings,
+            context.symbols,
             context.reviews,
             context.patches,
             _provider(context),
+            context.settings.load(),
         ).suggest(request.repo_path, request.snapshot_id, request.finding_id)
         return JSONResponse({"patch": patch})
 
     @app.post("/api/settings")
     async def save_settings(request: SettingsRequest) -> JSONResponse:
+        current = context.settings.load()
         settings = AppSettings(
-            database_path=context.settings.load().database_path,
+            database_path=current.database_path,
             llm_provider=request.llm_provider,
             llm_api_key=request.llm_api_key,
             llm_model=request.llm_model,
             llm_base_url=request.llm_base_url,
+            analyzer_backend=request.analyzer_backend,
+            lsp_enabled=request.lsp_enabled,
             llm_timeout_seconds=request.llm_timeout_seconds,
             llm_retry_count=request.llm_retry_count,
             llm_max_findings_per_scan=request.llm_max_findings_per_scan,
@@ -254,7 +261,7 @@ def create_app() -> FastAPI:
         snapshot = context.snapshots.get(snapshot_id)
         repo = context.repositories.get_by_id(snapshot.repo_id)
         findings = context.findings.list_for_snapshot(snapshot_id)
-        compare = CompareOrchestrator(context.snapshots, context.findings, context.dependencies, context.files).compare_latest(repo.id or 0)
+        compare = CompareOrchestrator(context.snapshots, context.findings, context.dependencies, context.files, context.symbols).compare_latest(repo.id or 0)
         reviews = [dict(row) for row in context.reviews.list_for_snapshot(snapshot_id)]
         generator = ReportGenerator()
         payload = generator.build_payload(repo, snapshot, findings, compare, reviews)
@@ -339,7 +346,7 @@ def _snapshot_payload(context: AppContext, repo_id: int, snapshot_id: int) -> di
     snapshot = context.snapshots.get(snapshot_id)
     repo = context.repositories.get_by_id(repo_id)
     findings = context.findings.list_for_snapshot(snapshot_id)
-    compare = CompareOrchestrator(context.snapshots, context.findings, context.dependencies, context.files).compare_latest(repo_id)
+    compare = CompareOrchestrator(context.snapshots, context.findings, context.dependencies, context.files, context.symbols).compare_latest(repo_id)
     symbols = context.symbols.list_for_snapshot(snapshot_id)
     chunks = context.embeddings.list_for_snapshot(snapshot_id)
     patches = context.patches.list_for_snapshot(snapshot_id)

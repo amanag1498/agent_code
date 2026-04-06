@@ -43,9 +43,21 @@ class AppContext:
         self.settings = SettingsStore(self.connection)
         loaded = self.settings.load()
         loaded.llm_provider = os.getenv("LLM_PROVIDER", loaded.llm_provider)
+        loaded.analyzer_backend = os.getenv("ANALYZER_BACKEND", loaded.analyzer_backend)
+        loaded.lsp_enabled = os.getenv("LSP_ENABLED", str(loaded.lsp_enabled)).lower() in {"1", "true", "yes", "on"}
+        provider_name = loaded.llm_provider.strip().lower()
         if not loaded.llm_api_key:
-            loaded.llm_api_key = os.getenv("LLM_API_KEY", os.getenv("GEMINI_API_KEY", ""))
-        loaded.llm_model = os.getenv("LLM_MODEL", os.getenv("GEMINI_MODEL", loaded.llm_model))
-        loaded.llm_base_url = os.getenv("LLM_BASE_URL", loaded.llm_base_url)
+            if provider_name == "openrouter":
+                loaded.llm_api_key = os.getenv("OPENROUTER_API_KEY", os.getenv("LLM_API_KEY", ""))
+            else:
+                loaded.llm_api_key = os.getenv("LLM_API_KEY", os.getenv("GEMINI_API_KEY", ""))
+        if provider_name == "openrouter":
+            loaded.llm_model = os.getenv("OPENROUTER_MODEL", os.getenv("LLM_MODEL", loaded.llm_model))
+            loaded.llm_base_url = os.getenv("OPENROUTER_BASE_URL", os.getenv("LLM_BASE_URL", loaded.llm_base_url))
+        else:
+            loaded.llm_model = os.getenv("LLM_MODEL", os.getenv("GEMINI_MODEL", loaded.llm_model))
+            loaded.llm_base_url = os.getenv("LLM_BASE_URL", loaded.llm_base_url)
+        if loaded.llm_max_findings_per_scan == 10:
+            loaded.llm_max_findings_per_scan = 25
         set_logging_level(loaded.logging_level)
         self.settings.save(loaded)

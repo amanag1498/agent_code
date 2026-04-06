@@ -4,6 +4,7 @@ const state = {
   currentSnapshot: null,
   currentPayload: null,
   currentFinding: null,
+  currentPatchFinding: null,
   currentTreePath: null,
   activeScanJobId: null,
   activeScanPath: null,
@@ -25,14 +26,14 @@ function bindElements() {
     "repo-list", "scan-form", "scan-path", "browse-folder-button", "rescan-button", "hero-title", "hero-meta",
     "stat-findings", "stat-risk", "stat-changes", "stat-memory",
     "overview-repo", "overview-summary", "overview-runs", "overview-health",
-    "overview-languages", "overview-top-findings", "tree-view", "tree-filter",
+    "overview-languages", "overview-top-findings", "overview-memory", "overview-diff", "overview-critical-paths", "overview-scan-posture", "overview-risk-board", "tree-view", "tree-filter",
     "tree-summary", "file-detail", "file-preview", "findings-table", "finding-detail",
-    "compare-new", "compare-fixed", "compare-unchanged", "compare-deps",
+    "compare-new", "compare-fixed", "compare-unchanged", "compare-deps", "compare-deltas",
     "compare-summary", "compare-files", "compare-dependency-list", "memory-timeline",
     "memory-detail", "memory-symbols", "memory-chunks", "chat-output", "chat-question",
-    "chat-send", "patch-generate", "patch-output", "refresh-logs", "log-output",
-    "settings-form", "settings-provider", "settings-api-key", "settings-model", "settings-base-url", "settings-timeout",
-    "settings-retries", "settings-max-findings", "settings-chunk-lines", "settings-watch",
+    "chat-send", "patch-generate", "patch-output", "patch-selection", "refresh-logs", "log-output",
+    "settings-form", "settings-provider", "settings-api-key", "settings-model", "settings-base-url", "settings-analyzer-backend",
+    "settings-lsp-enabled", "settings-timeout", "settings-retries", "settings-max-findings", "settings-chunk-lines", "settings-watch",
     "settings-log-level", "install-hook", "report-json", "report-md", "report-html",
     "filter-severity", "filter-category", "filter-source", "repo-graph", "graph-summary",
     "signal-bands", "tree-breadcrumb", "finding-kpis", "compare-insights",
@@ -68,6 +69,7 @@ function bindEvents() {
   elements["patch-generate"].addEventListener("click", generatePatch);
   elements["refresh-logs"].addEventListener("click", loadLogs);
   elements["settings-form"].addEventListener("submit", saveSettings);
+  elements["settings-provider"].addEventListener("change", handleProviderChange);
   elements["install-hook"].addEventListener("click", installHook);
   elements["report-json"].addEventListener("click", () => downloadReport("json"));
   elements["report-md"].addEventListener("click", () => downloadReport("md"));
@@ -222,6 +224,7 @@ async function loadRepository(repoId) {
   state.currentSnapshot = payload.snapshot;
   state.currentPayload = payload;
   state.currentFinding = null;
+  state.currentPatchFinding = null;
   state.currentTreePath = null;
   renderCurrentPayload();
   await loadLogs();
@@ -304,7 +307,15 @@ function renderCurrentPayload() {
     `Chunks: ${chunks.length}`,
     `Patches: ${patches.length}`,
   ].join("\n");
-  elements["overview-summary"].textContent = snapshot.summary || "No summary.";
+  elements["overview-summary"].textContent = [
+    snapshot.summary || "No summary.",
+    "",
+    `Repository: ${repository.name}`,
+    `Snapshot: ${snapshot.id}`,
+    `Current Findings: ${findings.length}`,
+    `Risk Score: ${extractRisk(snapshot.summary)}`,
+    `Changed Files: ${compare?.changed_files?.length || 0}`,
+  ].join("\n");
   elements["overview-runs"].textContent = scan_runs.length
     ? scan_runs.map((run) => `[${run.scanner_name}] ${run.status}\n${run.message}\nFinished: ${run.finished_at || "n/a"}`).join("\n\n")
     : "No scan execution history.";
@@ -324,12 +335,35 @@ function renderCurrentPayload() {
     "Frameworks",
     ...(scan_metadata.frameworks || []),
   ].join("\n");
+  elements["overview-memory"].textContent = [
+    `Symbols Indexed: ${symbols.length}`,
+    `Chunks Stored: ${chunks.length}`,
+    `Reviews Stored: ${reviews.length}`,
+    `Patch Suggestions: ${patches.length}`,
+    "",
+    "Coverage Notes:",
+    "Symbols and chunks are the memory substrate for compare, chat, and patch context.",
+  ].join("\n");
+  elements["overview-diff"].textContent = compare
+    ? [
+        `Previous Snapshot: ${compare.previous_snapshot_id || "n/a"}`,
+        `Current Snapshot: ${compare.current_snapshot_id || "n/a"}`,
+        `Changed Files: ${(compare.changed_files || []).length}`,
+        `Changed Dependencies: ${(compare.changed_dependencies || []).length}`,
+        `Risk Delta: ${compare.risk_delta ?? 0}`,
+        "",
+        compare.summary,
+      ].join("\n")
+    : "No prior snapshot available for diff analysis.";
   elements["overview-top-findings"].textContent = findings.length
     ? findings.slice(0, 10).map((finding) => `[${finding.severity}] ${finding.title}\n${finding.file_path || "n/a"}`).join("\n\n")
     : "No findings stored.";
+  elements["overview-critical-paths"].textContent = buildCriticalPathsSummary(payload);
+  elements["overview-scan-posture"].textContent = buildScanPostureSummary(payload);
 
   renderRepositoryGraph(payload);
   renderSignalBands(payload);
+  renderRiskBoard(payload);
   populateFilters(findings);
   renderFindings();
   renderCompare(compare);
@@ -338,6 +372,9 @@ function renderCurrentPayload() {
   elements["patch-output"].textContent = patches.length
     ? patches.slice(0, 6).map((patch) => `${patch.summary}\n${patch.suggested_diff}`).join("\n\n")
     : "No patch suggestions yet.";
+  elements["patch-selection"].textContent = state.currentPatchFinding
+    ? formatPatchSelection(state.currentPatchFinding)
+    : "Select a new or regressed finding from the Compare page to enable Patch Lab.";
   elements["finding-detail"].textContent = "Select a finding to inspect its structured LLM judgment.";
   elements["file-detail"].textContent = "Select a file or folder.";
   elements["file-preview"].textContent = "Select a text file to preview its contents.";
@@ -422,6 +459,7 @@ function renderCompare(compare) {
   elements["compare-unchanged"].textContent = "0";
   elements["compare-deps"].textContent = "0";
   elements["compare-summary"].textContent = "No prior snapshot available.";
+  elements["compare-deltas"].innerHTML = "";
   elements["compare-files"].innerHTML = "";
   elements["compare-dependency-list"].innerHTML = "";
   renderCompareInsights(compare);
@@ -432,9 +470,62 @@ function renderCompare(compare) {
   elements["compare-unchanged"].textContent = String(deltas.filter((delta) => delta.delta_type === "unchanged").length);
   elements["compare-deps"].textContent = String((compare.changed_dependencies || []).length);
   elements["compare-summary"].textContent = `${compare.summary}\n\nRisk Delta: ${compare.risk_delta}\nPrevious Snapshot: ${compare.previous_snapshot_id}\nCurrent Snapshot: ${compare.current_snapshot_id}`;
+  renderCompareDeltas(compare);
   renderChipList(elements["compare-files"], compare.changed_files || [], "No changed files detected.");
   renderChipList(elements["compare-dependency-list"], compare.changed_dependencies || [], "No changed dependencies detected.");
   renderCompareInsights(compare);
+}
+
+function renderCompareDeltas(compare) {
+  const container = elements["compare-deltas"];
+  container.innerHTML = "";
+  const payload = state.currentPayload;
+  if (!compare || !payload) {
+    container.innerHTML = `<div class="list-chip">No delta data available.</div>`;
+    return;
+  }
+  const actionable = (compare.deltas || []).filter((delta) => ["new", "regressed"].includes(delta.delta_type));
+  if (!actionable.length) {
+    container.innerHTML = `<div class="list-chip">No new or regressed findings available for patch generation.</div>`;
+    return;
+  }
+  for (const delta of actionable.slice(0, 20)) {
+    const finding = payload.findings.find((item) => item.id === delta.current_finding_id);
+    if (!finding) continue;
+    const button = document.createElement("button");
+    button.className = `delta-card ${state.currentPatchFinding?.id === finding.id ? "active" : ""}`;
+    button.innerHTML = `
+      <span class="delta-topline">
+        <span class="severity-pill severity-${escapeHtml(normalizeSeverity(finding.severity))}">${escapeHtml(finding.severity)}</span>
+        <span class="status-pill ${escapeHtml(delta.delta_type)}">${escapeHtml(delta.delta_type)}</span>
+      </span>
+      <strong>${escapeHtml(finding.title)}</strong>
+      <span class="subtle">${escapeHtml(finding.file_path || "n/a")} ${finding.line_start ? `• line ${finding.line_start}` : ""}</span>
+    `;
+    button.addEventListener("click", () => selectCompareFinding(finding.id));
+    container.appendChild(button);
+  }
+}
+
+function selectCompareFinding(findingId) {
+  const payload = state.currentPayload;
+  if (!payload) return;
+  state.currentPatchFinding = payload.findings.find((finding) => finding.id === findingId) || null;
+  elements["patch-selection"].textContent = state.currentPatchFinding
+    ? formatPatchSelection(state.currentPatchFinding)
+    : "Select a new or regressed finding from the Compare page to enable Patch Lab.";
+  renderCompare(payload.compare);
+}
+
+function formatPatchSelection(finding) {
+  return [
+    `Title: ${finding.title}`,
+    `Severity: ${finding.severity}`,
+    `Category: ${finding.category}`,
+    `File: ${finding.file_path || "n/a"}`,
+    `Lines: ${finding.line_start || "n/a"}-${finding.line_end || "n/a"}`,
+    `Source: selected from Compare`,
+  ].join("\n");
 }
 
 function renderChipList(container, values, emptyText) {
@@ -609,8 +700,8 @@ function appendChat(role, message) {
 }
 
 async function generatePatch() {
-  if (!state.currentRepository || !state.currentSnapshot || !state.currentFinding) {
-    alert("Select a finding first.");
+  if (!state.currentRepository || !state.currentSnapshot || !state.currentPatchFinding) {
+    alert("Select a new or regressed finding from the Compare page first.");
     return;
   }
   const response = await fetch("/api/patch", {
@@ -619,7 +710,7 @@ async function generatePatch() {
     body: JSON.stringify({
       repo_path: state.currentRepository.path,
       snapshot_id: state.currentSnapshot.id,
-      finding_id: state.currentFinding.id,
+      finding_id: state.currentPatchFinding.id,
     }),
   });
   const payload = await response.json();
@@ -642,12 +733,48 @@ function applySettings(settings) {
   elements["settings-api-key"].value = settings.llm_api_key || "";
   elements["settings-model"].value = settings.llm_model || "";
   elements["settings-base-url"].value = settings.llm_base_url || "";
+  elements["settings-analyzer-backend"].value = settings.analyzer_backend || "hybrid";
+  elements["settings-lsp-enabled"].value = String(settings.lsp_enabled !== false);
   elements["settings-timeout"].value = settings.llm_timeout_seconds || 60;
   elements["settings-retries"].value = settings.llm_retry_count || 2;
-  elements["settings-max-findings"].value = settings.llm_max_findings_per_scan || 10;
+  elements["settings-max-findings"].value = settings.llm_max_findings_per_scan || 25;
   elements["settings-chunk-lines"].value = settings.embedding_chunk_lines || 80;
   elements["settings-watch"].value = String(Boolean(settings.watch_mode_enabled));
   elements["settings-log-level"].value = settings.logging_level || "INFO";
+  handleProviderChange();
+}
+
+function handleProviderChange() {
+  const provider = elements["settings-provider"].value;
+  const modelInput = elements["settings-model"];
+  const baseUrlInput = elements["settings-base-url"];
+
+  if (provider === "openrouter") {
+    if (!baseUrlInput.value.trim()) {
+      baseUrlInput.value = "https://openrouter.ai/api/v1";
+    }
+    baseUrlInput.placeholder = "https://openrouter.ai/api/v1";
+    modelInput.placeholder = "openai/gpt-4o-mini or anthropic/claude-3.5-sonnet";
+    return;
+  }
+
+  if (provider === "openai_compatible") {
+    baseUrlInput.placeholder = "https://api.example.com/v1";
+    modelInput.placeholder = "your-model-name";
+    return;
+  }
+
+  if (provider === "gemini") {
+    modelInput.placeholder = "gemini-2.5-flash";
+    if (baseUrlInput.value === "https://openrouter.ai/api/v1") {
+      baseUrlInput.value = "";
+    }
+    baseUrlInput.placeholder = "";
+    return;
+  }
+
+  modelInput.placeholder = "";
+  baseUrlInput.placeholder = "";
 }
 
 async function saveSettings(event) {
@@ -657,9 +784,11 @@ async function saveSettings(event) {
     llm_api_key: elements["settings-api-key"].value,
     llm_model: elements["settings-model"].value,
     llm_base_url: elements["settings-base-url"].value,
+    analyzer_backend: elements["settings-analyzer-backend"].value,
+    lsp_enabled: elements["settings-lsp-enabled"].value === "true",
     llm_timeout_seconds: Number(elements["settings-timeout"].value || 60),
     llm_retry_count: Number(elements["settings-retries"].value || 2),
-    llm_max_findings_per_scan: Number(elements["settings-max-findings"].value || 10),
+    llm_max_findings_per_scan: Number(elements["settings-max-findings"].value || 25),
     embedding_chunk_lines: Number(elements["settings-chunk-lines"].value || 80),
     watch_mode_enabled: elements["settings-watch"].value === "true",
     logging_level: elements["settings-log-level"].value,
@@ -710,47 +839,69 @@ function renderRepositoryGraph(payload) {
   const graph = elements["repo-graph"];
   if (!graph) return;
   const files = payload.files || [];
+  const findings = payload.findings || [];
   const changedFiles = new Set(payload.compare?.changed_files || []);
   const topDirs = aggregateTopDirectories(files, changedFiles);
   const frameworks = (payload.scan_metadata?.frameworks || []).slice(0, 4);
   const languages = Object.entries(payload.scan_metadata?.languages || {})
     .sort((left, right) => right[1] - left[1])
     .slice(0, 4);
+  const highRisk = findings.filter((finding) => ["critical", "high"].includes(normalizeSeverity(finding.severity)));
+  const riskyFiles = aggregateRiskFiles(highRisk);
+  const riskCount = highRisk.length;
+  const changeCount = changedFiles.size;
   const nodes = [
-    {label: payload.repository.name, x: 450, y: 150, radius: 42, hub: true, changed: false},
+    {label: payload.repository.name, x: 450, y: 150, radius: 44, hub: true, changed: false, tone: "hub"},
+    {label: `Risk ${riskCount}`, x: 720, y: 150, radius: 28, changed: false, tone: "risk"},
+    {label: `Changes ${changeCount}`, x: 170, y: 150, radius: 24, changed: changeCount > 0, tone: "change"},
     ...topDirs.slice(0, 5).map((item, index) => ({
       label: `${item.name} (${item.count})`,
-      x: 150 + index * 140,
-      y: index % 2 === 0 ? 74 : 228,
-      radius: 24 + Math.min(item.count, 10),
+      x: 160 + index * 120,
+      y: index % 2 === 0 ? 70 : 238,
+      radius: 18 + Math.min(item.count, 12),
       changed: item.changedCount > 0,
+      tone: "zone",
     })),
     ...languages.map(([name, count], index) => ({
       label: `${name} ${count}`,
-      x: 180 + index * 170,
-      y: 150,
-      radius: 16 + Math.min(Number(count), 14),
+      x: 250 + index * 120,
+      y: 34,
+      radius: 12 + Math.min(Number(count), 12),
       changed: false,
+      tone: "lang",
     })),
     ...frameworks.map((name, index) => ({
       label: name,
-      x: 720,
-      y: 70 + index * 52,
-      radius: 18,
+      x: 760,
+      y: 58 + index * 48,
+      radius: 15,
       changed: false,
+      tone: "framework",
+    })),
+    ...riskyFiles.slice(0, 3).map((item, index) => ({
+      label: `${item.name} (${item.count})`,
+      x: 640 + index * 95,
+      y: 242,
+      radius: 14 + Math.min(item.count, 10),
+      changed: changedFiles.has(item.path),
+      tone: "risk-file",
     })),
   ];
   const edges = nodes.slice(1).map((node) => `
-    <line class="link" x1="450" y1="150" x2="${node.x}" y2="${node.y}"></line>
+    <line class="link ${node.tone || ""}" x1="450" y1="150" x2="${node.x}" y2="${node.y}"></line>
   `).join("");
   const circles = nodes.map((node) => `
     <g>
-      <circle class="node ${node.hub ? "hub" : ""} ${node.changed ? "changed" : ""}" cx="${node.x}" cy="${node.y}" r="${node.radius}"></circle>
-      <text x="${node.x}" y="${node.y + node.radius + 18}" text-anchor="middle">${escapeHtml(node.label)}</text>
+      <circle class="node ${node.hub ? "hub" : ""} ${node.changed ? "changed" : ""} ${node.tone || ""}" cx="${node.x}" cy="${node.y}" r="${node.radius}"></circle>
+      <text class="graph-label ${node.tone || ""}" x="${node.x}" y="${node.y + node.radius + 18}" text-anchor="middle">${escapeHtml(node.label)}</text>
     </g>
   `).join("");
-  graph.innerHTML = `${edges}${circles}`;
-  elements["graph-summary"].textContent = `${topDirs.length} major zones | ${languages.length} language signals | ${frameworks.length} framework markers`;
+  const halos = `
+    <circle class="graph-ring" cx="450" cy="150" r="84"></circle>
+    <circle class="graph-ring faint" cx="450" cy="150" r="126"></circle>
+  `;
+  graph.innerHTML = `${halos}${edges}${circles}`;
+  elements["graph-summary"].textContent = `${topDirs.length} major zones | ${languages.length} language signals | ${frameworks.length} framework markers | ${riskyFiles.length} risky hotspots`;
 }
 
 function aggregateTopDirectories(files, changedFiles) {
@@ -800,6 +951,91 @@ function renderSignalBands(payload) {
       <div class="subtle">${escapeHtml(band.note)}</div>
     </article>
   `).join("");
+}
+
+function renderRiskBoard(payload) {
+  const container = elements["overview-risk-board"];
+  if (!container) return;
+  const findings = payload.findings || [];
+  const compare = payload.compare || {};
+  const highRisk = findings.filter((finding) => ["critical", "high"].includes(normalizeSeverity(finding.severity)));
+  const cards = [
+    {
+      label: "Change Pressure",
+      value: (compare.changed_files || []).length,
+      note: "Changed files in the current compare window.",
+    },
+    {
+      label: "High-Risk Density",
+      value: filesafeRatio(highRisk.length, Math.max((payload.files || []).length, 1)),
+      note: "High-risk findings per tracked file.",
+    },
+    {
+      label: "Review Coverage",
+      value: filesafeRatio((payload.reviews || []).length, Math.max(findings.length, 1)),
+      note: "Structured reviews relative to stored findings.",
+    },
+    {
+      label: "Patch Readiness",
+      value: payload.patches?.length || 0,
+      note: "Generated patch suggestions available for inspection.",
+    },
+  ];
+  container.innerHTML = cards.map((card) => `
+    <article class="signal-card emphasis-card">
+      <span class="stat-label">${escapeHtml(card.label)}</span>
+      <strong>${escapeHtml(card.value)}</strong>
+      <div class="subtle">${escapeHtml(card.note)}</div>
+    </article>
+  `).join("");
+}
+
+function buildCriticalPathsSummary(payload) {
+  const files = payload.files || [];
+  const changedFiles = new Set(payload.compare?.changed_files || []);
+  const findings = payload.findings || [];
+  const groups = aggregateTopDirectories(files, changedFiles).slice(0, 5);
+  const lines = groups.map((group) => {
+    const groupFindings = findings.filter((finding) => (finding.file_path || "").startsWith(`${group.name}/`) || finding.file_path === group.name);
+    const severe = groupFindings.filter((finding) => ["critical", "high"].includes(normalizeSeverity(finding.severity))).length;
+    return `${group.name}: ${group.count} files | ${group.changedCount} changed | ${severe} high-risk findings`;
+  });
+  return lines.length ? lines.join("\n") : "No critical path summary available yet.";
+}
+
+function buildScanPostureSummary(payload) {
+  const scanRuns = payload.scan_runs || [];
+  const reviews = payload.reviews || [];
+  const findings = payload.findings || [];
+  const completed = scanRuns.filter((run) => run.status === "completed").length;
+  const failed = scanRuns.filter((run) => run.status === "failed").length;
+  return [
+    `Completed runs: ${completed}`,
+    `Failed runs: ${failed}`,
+    `Stored reviews: ${reviews.length}`,
+    `Findings with review ratio: ${filesafeRatio(reviews.length, Math.max(findings.length, 1))}`,
+    "",
+    completed
+      ? "Latest scan pipeline completed and persisted."
+      : "No completed scan runs recorded for this snapshot.",
+  ].join("\n");
+}
+
+function aggregateRiskFiles(findings) {
+  const groups = new Map();
+  for (const finding of findings) {
+    const path = finding.file_path || "unknown";
+    const name = path.split("/").slice(-2).join("/") || path;
+    const entry = groups.get(path) || {path, name, count: 0};
+    entry.count += 1;
+    groups.set(path, entry);
+  }
+  return [...groups.values()].sort((left, right) => right.count - left.count);
+}
+
+function filesafeRatio(numerator, denominator) {
+  const value = denominator ? numerator / denominator : 0;
+  return `${value.toFixed(2)}x`;
 }
 
 function renderFindingKpis(filteredFindings, allFindings) {

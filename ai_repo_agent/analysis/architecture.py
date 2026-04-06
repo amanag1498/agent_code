@@ -14,7 +14,7 @@ class ArchitectureMapper:
         if any(path.startswith("src/") for path in paths) and any(path.startswith("tests/") for path in paths):
             observations.append("Source and tests are separated, which suggests conventional layering.")
         if sum(1 for path in paths if path.endswith(".py")) > 100:
-            observations.append("Large Python footprint may benefit from AST-based symbol graphing.")
+            observations.append("Large Python footprint may benefit from richer structural graphing and semantic indexing.")
         if any("migrations/" in path for path in paths):
             observations.append("Database migration directories detected.")
         return observations or ["Architecture mapper is using placeholder heuristics."]

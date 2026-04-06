@@ -200,6 +200,41 @@ class ChunkDescriptor:
 
 
 @dataclass(slots=True)
+class CodeUnitDescriptor:
+    file_path: str
+    unit_name: str | None
+    unit_kind: str
+    line_start: int
+    line_end: int
+    imports: list[str] = field(default_factory=list)
+    comments: list[str] = field(default_factory=list)
+    parent_name: str | None = None
+    semantic: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class SemanticReferenceDescriptor:
+    file_path: str
+    symbol_name: str | None
+    relation: str
+    line_start: int | None
+    line_end: int | None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class FileStructureDescriptor:
+    file_path: str
+    language: str
+    symbols: list["SymbolDescriptor"]
+    imports: list[str]
+    comments: list[str]
+    code_units: list["CodeUnitDescriptor"]
+    semantic_references: list["SemanticReferenceDescriptor"] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class CompareResult:
     previous_snapshot_id: int | None
     current_snapshot_id: int
@@ -353,9 +388,11 @@ class AppSettings:
     llm_api_key: str = ""
     llm_model: str = "gemini-2.5-flash"
     llm_base_url: str = ""
+    analyzer_backend: str = "hybrid"
+    lsp_enabled: bool = True
     llm_timeout_seconds: int = 60
     llm_retry_count: int = 2
-    llm_max_findings_per_scan: int = 20
+    llm_max_findings_per_scan: int = 25
     embedding_chunk_lines: int = 80
     watch_mode_enabled: bool = False
     logging_level: str = "INFO"

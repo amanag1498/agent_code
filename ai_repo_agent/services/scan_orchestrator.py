@@ -6,10 +6,12 @@ import json
 import logging
 from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
 from typing import Callable
 
 from ai_repo_agent.analysis.architecture import ArchitectureMapper
 from ai_repo_agent.analysis.chunks import ChunkBuilder
+from ai_repo_agent.analysis.code_analysis import create_code_analyzer
 from ai_repo_agent.analysis.diff import DiffService
 from ai_repo_agent.analysis.risk import RiskScoringEngine
 from ai_repo_agent.analysis.summary import SummaryBuilder
@@ -20,6 +22,7 @@ from ai_repo_agent.core.models import (
     DependencyRecord,
     EmbeddingChunkRecord,
     FileRecord,
+    FileInventoryItem,
     FileVersionRecord,
     Finding,
     FindingRecord,
@@ -82,8 +85,9 @@ class ScanOrchestrator:
         self.diff_service = DiffService()
         self.summary_builder = SummaryBuilder()
         self.architecture_mapper = ArchitectureMapper()
-        self.symbol_indexer = SymbolIndexer()
-        self.chunk_builder = ChunkBuilder()
+        self.analyzer = create_code_analyzer(settings)
+        self.symbol_indexer = SymbolIndexer(self.analyzer)
+        self.chunk_builder = ChunkBuilder(self.analyzer)
 
     def scan(self, path: str, progress_callback: Callable[[str, int], None] | None = None) -> ScanResult:
         self._progress(progress_callback, "Loading repository context", 5)
@@ -144,8 +148,8 @@ class ScanOrchestrator:
         self.dependency_store.replace_for_snapshot(snapshot.id or 0, dep_records)
         LOGGER.info("Persisted %s dependencies for snapshot %s", len(dep_records), snapshot.id)
 
-        self._progress(progress_callback, "Indexing symbols", 40)
-        symbols = self.symbol_indexer.index(repo_context.files)
+        self._progress(progress_callback, f"Indexing symbols via {self.analyzer.backend_name}", 40)
+        symbols = self.symbol_indexer.index(repo_context.path, repo_context.files)
         self.symbol_store.replace_for_snapshot(
             snapshot.id or 0,
             [
@@ -163,8 +167,8 @@ class ScanOrchestrator:
         )
         LOGGER.info("Persisted %s symbols for snapshot %s", len(symbols), snapshot.id)
 
-        self._progress(progress_callback, "Building code memory", 52)
-        chunks = self.chunk_builder.build(repo_context.files, max_lines=self.settings.embedding_chunk_lines)
+        self._progress(progress_callback, f"Building code memory via {self.analyzer.backend_name}", 52)
+        chunks = self.chunk_builder.build(repo_context.path, repo_context.files, max_lines=self.settings.embedding_chunk_lines)
         self.embedding_store.replace_for_snapshot(
             snapshot.id or 0,
             [
@@ -296,6 +300,8 @@ class ScanOrchestrator:
             current_dependencies=dep_records,
             previous_dependencies=previous_dependencies,
             changed_files=repo_context.git_state.changed_files,
+            current_symbols=self.symbol_store.list_for_snapshot(snapshot.id or 0),
+            previous_symbols=self.symbol_store.list_for_snapshot(previous_snapshot.id) if previous_snapshot else [],
         )
         self.finding_store.add_deltas(compare_result.deltas)
         risk_score = self.risk_engine.score(findings, repo_context.git_state, len(repo_context.dependencies))
@@ -392,3 +398,41 @@ class ScanOrchestrator:
     @staticmethod
     def _fingerprint(item) -> str:
         return f"{item.rule_id}|{item.file_path}|{item.line_start}|{item.title}"
+
+    def patch_context_for_file(self, repo_root: str, file_path: str, line_start: int | None, line_end: int | None) -> dict:
+        full_path = Path(repo_root) / file_path
+        if not full_path.exists():
+            return {}
+        try:
+            text = full_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            return {}
+        file_item = FileInventoryItem(
+            path=file_path,
+            absolute_path=str(full_path),
+            size=full_path.stat().st_size,
+            sha256="",
+            language=self._infer_language(file_path),
+            is_binary=False,
+            lines=len(text.splitlines()),
+        )
+        return self.analyzer.get_patch_context(Path(repo_root), file_item, line_start, line_end)
+
+    @staticmethod
+    def _infer_language(file_path: str) -> str:
+        suffix = Path(file_path).suffix.lower()
+        return {
+            ".py": "python",
+            ".js": "javascript",
+            ".jsx": "javascript",
+            ".ts": "typescript",
+            ".tsx": "tsx",
+            ".java": "java",
+            ".go": "go",
+            ".rs": "rust",
+            ".c": "c",
+            ".cc": "cpp",
+            ".cpp": "cpp",
+            ".h": "c",
+            ".hpp": "cpp",
+        }.get(suffix, "text")

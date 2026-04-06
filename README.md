@@ -12,8 +12,10 @@ AI Repo Analyst is a local-first Python web application for repository analysis,
   - file inventory
   - language/framework detection
   - dependency detection
-  - Python AST symbol extraction
-  - chunked code memory
+  - pluggable code structure analysis
+  - Tree-sitter structural extraction with legacy AST fallback
+  - optional LSP semantic enrichment
+  - chunked code memory based on structural code units
 - Use a pluggable LLM provider for:
   - structured finding generation
   - repo-level risk summary
@@ -84,6 +86,13 @@ export LLM_MODEL="your-model-name"
 export LLM_BASE_URL="https://your-endpoint.example.com/v1"
 ```
 
+Optional analyzer configuration:
+
+```bash
+export ANALYZER_BACKEND="hybrid"
+export LSP_ENABLED="true"
+```
+
 4. Run the local web app:
 
 ```bash
@@ -106,7 +115,7 @@ python main.py
 
 ## Notes
 
-- Core repo ingestion, git inspection, SQLite persistence, symbol extraction, chunking, reporting, and snapshot comparison are local.
+- Core repo ingestion, git inspection, SQLite persistence, structural parsing, chunking, reporting, and snapshot comparison are local.
 - The configured LLM provider powers structured findings, repo chat, patch suggestions, and repo summaries.
 - Gemini works out of the box as the default provider, but the service layer also supports OpenAI-compatible endpoints.
 - If no LLM provider is configured, the app still builds local memory and stores snapshots, but LLM features will be skipped or return an explanatory message.
@@ -115,7 +124,7 @@ python main.py
 
 ## Main Components
 
-- `analysis`: local heuristics, AST symbol extraction, chunking, diff logic, summary and risk scoring
+- `analysis`: local heuristics, analyzer abstractions, Tree-sitter/legacy AST parsing, optional LSP enrichment, chunking, diff logic, summary and risk scoring
 - `db`: SQLite schema and repository helpers
 - `llm`: provider factory, grounded prompt building, evidence packaging, and structured workflows
 - `repo`: repo loading, git service, inventory, fingerprinting
@@ -123,12 +132,27 @@ python main.py
 - `services`: orchestrators for scan, compare, chat, patching, pre-commit, and app context
 - `web`: FastAPI server, browser templates, and static assets
 
+## Analyzer Migration
+
+The analysis pipeline has been migrated behind a pluggable analyzer layer.
+
+- Structural parsing now prefers Tree-sitter
+- Semantic enrichment is handled by an optional LSP layer
+- The legacy AST backend is preserved behind `legacy_ast`
+- Existing snapshot, memory, findings, patch, and UI flows remain intact
+
+Detailed notes:
+
+- [Analyzer Migration Notes](docs/analyzer_migration.md)
+
 ## Phase 2 Status
 
 Implemented:
 
-- Python AST symbol extraction
-- chunked repo memory persistence
+- hybrid analyzer abstraction
+- Tree-sitter structural extraction with graceful fallback
+- optional LSP enrichment layer
+- symbol extraction and chunked repo memory persistence through the analyzer interface
 - repo chat backed by stored local chunks
 - patch suggestion flow
 - pre-commit hook installer
@@ -136,7 +160,7 @@ Implemented:
 Still to deepen:
 
 - semantic embeddings and retrieval scoring
-- richer multi-language AST coverage
+- richer live LSP resolution for definitions/references/call hierarchy
 - non-blocking background workers for long LLM requests
 - patch application and validation workflows
 - deeper architecture graph views

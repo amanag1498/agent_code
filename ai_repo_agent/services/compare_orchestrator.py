@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ai_repo_agent.analysis.diff import DiffService
 from ai_repo_agent.core.models import CompareResult
-from ai_repo_agent.db.repositories import DependencyStore, FileStore, FindingStore, SnapshotStore
+from ai_repo_agent.db.repositories import DependencyStore, FileStore, FindingStore, SnapshotStore, SymbolStore
 
 
 class CompareOrchestrator:
@@ -16,11 +16,13 @@ class CompareOrchestrator:
         finding_store: FindingStore,
         dependency_store: DependencyStore,
         file_store: FileStore,
+        symbol_store: SymbolStore,
     ) -> None:
         self.snapshot_store = snapshot_store
         self.finding_store = finding_store
         self.dependency_store = dependency_store
         self.file_store = file_store
+        self.symbol_store = symbol_store
         self.diff_service = DiffService()
 
     def compare_latest(self, repo_id: int) -> CompareResult | None:
@@ -38,4 +40,6 @@ class CompareOrchestrator:
             self.dependency_store.list_for_snapshot(current.id or 0),
             self.dependency_store.list_for_snapshot(previous.id or 0),
             changed_files,
+            self.symbol_store.list_for_snapshot(current.id or 0),
+            self.symbol_store.list_for_snapshot(previous.id or 0),
         )

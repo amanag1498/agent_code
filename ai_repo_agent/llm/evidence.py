@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -255,16 +256,23 @@ class EvidenceBuilder:
         chunks: list[EmbeddingChunkRecord],
         history: list[dict[str, str]],
     ) -> tuple[dict, str]:
+        question_terms = self._question_terms(question)
+        ranked = sorted(
+            chunks,
+            key=lambda chunk: self._chat_chunk_score(chunk, question_terms),
+            reverse=True,
+        )
+        diversified = self._diversify_chunks(ranked, limit=8)
         evidence = {
             "question": question,
-            "history": history[-4:],
+            "history": history[-6:],
             "retrieved_chunks": [
                 {
                     "file_path": chunk.file_path,
-                    "chunk_text": chunk.chunk_text[:1400],
-                    "metadata": json.loads(chunk.metadata_json),
+                    "chunk_text": chunk.chunk_text[:1700],
+                    "metadata": self._safe_metadata(chunk.metadata_json),
                 }
-                for chunk in chunks[:5]
+                for chunk in diversified
             ],
         }
         evidence_hash = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode("utf-8")).hexdigest()
@@ -275,12 +283,19 @@ class EvidenceBuilder:
         repo_root: Path,
         finding: FindingRecord,
         related_chunks: list[EmbeddingChunkRecord],
+        related_symbols: list[SymbolRecord],
+        patch_context: dict[str, Any],
     ) -> tuple[dict, str]:
         snippet = ""
         if finding.file_path:
             full_path = repo_root / finding.file_path
             if full_path.exists():
-                snippet = full_path.read_text(encoding="utf-8", errors="ignore")[:2200]
+                lines = full_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+                start = max((finding.line_start or 1) - 18, 1)
+                end = min((finding.line_end or finding.line_start or 1) + 18, len(lines))
+                snippet = "\n".join(
+                    f"{index + 1}: {line}" for index, line in enumerate(lines[start - 1 : end], start=start - 1)
+                )[:3200]
         evidence = {
             "finding": {
                 "title": finding.title,
@@ -299,6 +314,17 @@ class EvidenceBuilder:
                 }
                 for chunk in related_chunks[:4]
             ],
+            "related_symbols": [
+                {
+                    "file_path": symbol.file_path,
+                    "symbol_name": symbol.symbol_name,
+                    "symbol_kind": symbol.symbol_kind,
+                    "line_start": symbol.line_start,
+                    "line_end": symbol.line_end,
+                }
+                for symbol in related_symbols[:12]
+            ],
+            "patch_context": patch_context,
         }
         evidence_hash = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode("utf-8")).hexdigest()
         return evidence, evidence_hash
@@ -360,6 +386,43 @@ class EvidenceBuilder:
     def _matches_focus(self, chunk: EmbeddingChunkRecord, terms: tuple[str, ...]) -> bool:
         haystack = f"{chunk.file_path}\n{chunk.chunk_text}\n{chunk.metadata_json}".lower()
         return any(term in haystack for term in terms)
+
+    def _chat_chunk_score(self, chunk: EmbeddingChunkRecord, question_terms: set[str]) -> int:
+        haystack = f"{chunk.file_path}\n{chunk.chunk_text}\n{chunk.metadata_json}".lower()
+        metadata = self._safe_metadata(chunk.metadata_json)
+        score = 0
+        for term in question_terms:
+            if term in chunk.file_path.lower():
+                score += 9
+            if term in haystack:
+                score += 3
+            if term in " ".join(metadata.get("imports", [])).lower():
+                score += 5
+            if term == str(metadata.get("symbol_name", "")).lower():
+                score += 7
+        if metadata.get("chunk_kind") in {"function", "method", "class"}:
+            score += 4
+        if "test" in chunk.file_path.lower():
+            score -= 3
+        return score
+
+    def _diversify_chunks(self, chunks: list[EmbeddingChunkRecord], limit: int) -> list[EmbeddingChunkRecord]:
+        selected: list[EmbeddingChunkRecord] = []
+        seen_files: dict[str, int] = {}
+        for chunk in chunks:
+            count = seen_files.get(chunk.file_path, 0)
+            if count >= 2:
+                continue
+            selected.append(chunk)
+            seen_files[chunk.file_path] = count + 1
+            if len(selected) >= limit:
+                break
+        return selected
+
+    @staticmethod
+    def _question_terms(question: str) -> set[str]:
+        tokens = {token for token in re.findall(r"[a-zA-Z_]{3,}", question.lower()) if len(token) >= 3}
+        return set(sorted(tokens))
 
     def _batch_cache_key(self, evidence: dict[str, Any]) -> str:
         chunk_signatures = [
