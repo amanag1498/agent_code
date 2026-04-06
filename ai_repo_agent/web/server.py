@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
@@ -67,6 +68,8 @@ class SettingsRequest(BaseModel):
     embedding_chunk_lines: int
     watch_mode_enabled: bool
     logging_level: str
+    scan_worker_limit: int
+    snapshot_retention_count: int
 
 
 class PrecommitRequest(BaseModel):
@@ -82,6 +85,7 @@ class ScanJob:
     progress: int = 0
     error: str | None = None
     snapshot_payload: dict[str, Any] | None = None
+    cancel_requested: bool = False
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
 
@@ -100,6 +104,7 @@ def create_app() -> FastAPI:
     app.state.log_handler = get_memory_log_handler()
     app.state.scan_jobs: dict[str, ScanJob] = {}
     app.state.scan_jobs_lock = threading.Lock()
+    app.state.scan_executor = ThreadPoolExecutor(max_workers=max(1, context.settings.load().scan_worker_limit))
     app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 
     @app.get("/", response_class=HTMLResponse)
@@ -125,12 +130,7 @@ def create_app() -> FastAPI:
         job = ScanJob(job_id=job_id, path=request.path)
         with app.state.scan_jobs_lock:
             app.state.scan_jobs[job_id] = job
-        worker = threading.Thread(
-            target=_run_scan_job,
-            args=(app, context.settings.load().database_path, job_id, request.path),
-            daemon=True,
-        )
-        worker.start()
+        app.state.scan_executor.submit(_run_scan_job, app, context.settings.load().database_path, job_id, request.path)
         return JSONResponse({"job_id": job_id, "status": job.status, "stage": job.stage, "progress": job.progress})
 
     @app.get("/api/scan-jobs/{job_id}")
@@ -151,6 +151,17 @@ def create_app() -> FastAPI:
             "result": job.snapshot_payload,
         }
         return JSONResponse(payload)
+
+    @app.post("/api/scan-jobs/{job_id}/cancel")
+    async def cancel_scan_job(job_id: str) -> JSONResponse:
+        with app.state.scan_jobs_lock:
+            job = app.state.scan_jobs.get(job_id)
+            if not job:
+                raise HTTPException(status_code=404, detail="Scan job not found.")
+            job.cancel_requested = True
+            job.stage = "Cancel requested"
+            job.updated_at = time.time()
+        return JSONResponse({"job_id": job_id, "status": "cancel_requested"})
 
     @app.get("/api/pick-folder")
     async def pick_folder() -> JSONResponse:
@@ -197,6 +208,21 @@ def create_app() -> FastAPI:
         content = full_path.read_text(encoding="utf-8", errors="ignore")
         return JSONResponse({"path": path, "type": "file", "content": content[:12000]})
 
+    @app.get("/api/repositories/{repo_id}/inspect")
+    async def repo_inspect(repo_id: int, path: str, line_start: int | None = None, line_end: int | None = None) -> JSONResponse:
+        repo = context.repositories.get_by_id(repo_id)
+        full_path = Path(repo.path) / path
+        if not full_path.exists() or full_path.is_dir():
+            raise HTTPException(status_code=404, detail="Inspectable file not found.")
+        content = full_path.read_text(encoding="utf-8", errors="ignore")
+        lines = content.splitlines()
+        start = max((line_start or 1) - 12, 1)
+        end = min((line_end or line_start or 1) + 12, len(lines))
+        snippet = "\n".join(
+            f"{index + 1}: {line}" for index, line in enumerate(lines[start - 1 : end], start=start - 1)
+        )
+        return JSONResponse({"path": path, "line_start": start, "line_end": end, "snippet": snippet, "content": content[:16000]})
+
     @app.post("/api/chat")
     async def repo_chat(request: ChatRequest) -> JSONResponse:
         answer = ChatOrchestrator(context.chat, context.embeddings, context.reviews, _provider(context)).ask(
@@ -217,7 +243,7 @@ def create_app() -> FastAPI:
             _provider(context),
             context.settings.load(),
         ).suggest(request.repo_path, request.snapshot_id, request.finding_id)
-        return JSONResponse({"patch": patch})
+        return JSONResponse({"patch": patch.get("suggested_diff") or patch.get("message", ""), "patch_record": patch})
 
     @app.post("/api/settings")
     async def save_settings(request: SettingsRequest) -> JSONResponse:
@@ -236,8 +262,12 @@ def create_app() -> FastAPI:
             embedding_chunk_lines=request.embedding_chunk_lines,
             watch_mode_enabled=request.watch_mode_enabled,
             logging_level=request.logging_level.upper(),
+            scan_worker_limit=request.scan_worker_limit,
+            snapshot_retention_count=request.snapshot_retention_count,
         )
         context.settings.save(settings)
+        app.state.scan_executor.shutdown(wait=False, cancel_futures=False)
+        app.state.scan_executor = ThreadPoolExecutor(max_workers=max(1, settings.scan_worker_limit))
         set_logging_level(settings.logging_level)
         LOGGER.info(
             "Web settings updated: provider=%s model=%s timeout=%s",
@@ -255,6 +285,11 @@ def create_app() -> FastAPI:
     async def install_precommit(request: PrecommitRequest) -> JSONResponse:
         hook_path = PrecommitService().install_hook(request.repo_path)
         return JSONResponse({"hook_path": str(hook_path)})
+
+    @app.post("/api/repositories/{repo_id}/retention")
+    async def trim_repo_history(repo_id: int, keep_latest: int = 12) -> JSONResponse:
+        deleted = context.snapshots.trim_repo_history(repo_id, max(2, keep_latest))
+        return JSONResponse({"deleted_snapshots": deleted, "kept": max(2, keep_latest)})
 
     @app.get("/api/report/{snapshot_id}")
     async def report(snapshot_id: int, format: str = "json"):
@@ -298,10 +333,15 @@ def _run_scan_job(app: FastAPI, database_path: str, job_id: str, path: str) -> N
             job.progress = progress
             job.updated_at = time.time()
 
+    def should_cancel() -> bool:
+        with app.state.scan_jobs_lock:
+            job = app.state.scan_jobs.get(job_id)
+            return bool(job and job.cancel_requested)
+
     try:
         update("Loading repository context", 5)
         orchestrator = _scan_orchestrator(job_context)
-        result = orchestrator.scan(path, progress_callback=update)
+        result = orchestrator.scan(path, progress_callback=update, cancel_callback=should_cancel)
         snapshot_id = result.snapshot.id or 0
         repo = job_context.repositories.get_by_id(result.snapshot.repo_id)
         payload = _snapshot_payload(job_context, repo.id or 0, snapshot_id)
@@ -314,12 +354,16 @@ def _run_scan_job(app: FastAPI, database_path: str, job_id: str, path: str) -> N
                 job.snapshot_payload = payload
                 job.updated_at = time.time()
     except Exception as exc:
-        LOGGER.exception("Background scan job failed for %s", path)
+        canceled = "canceled" in str(exc).lower()
+        if canceled:
+            LOGGER.info("Background scan job canceled for %s", path)
+        else:
+            LOGGER.exception("Background scan job failed for %s", path)
         with app.state.scan_jobs_lock:
             job = app.state.scan_jobs.get(job_id)
             if job:
-                job.status = "failed"
-                job.stage = "Scan failed"
+                job.status = "canceled" if canceled else "failed"
+                job.stage = "Scan canceled" if canceled else "Scan failed"
                 job.progress = 100
                 job.error = str(exc)
                 job.updated_at = time.time()
@@ -456,18 +500,39 @@ def _pick_folder_path() -> str:
         pass
 
     if platform.system() == "Darwin":
-        script = 'POSIX path of (choose folder with prompt "Select repository or folder")'
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-        if "User canceled" in result.stderr:
-            return ""
-        raise RuntimeError(f"macOS folder picker failed: {result.stderr.strip() or 'unknown error'}")
+        scripts = [
+            [
+                "-e",
+                'activate',
+                "-e",
+                'POSIX path of (choose folder with prompt "Select repository or folder")',
+            ],
+            [
+                "-e",
+                'tell application "Finder" to activate',
+                "-e",
+                'POSIX path of (choose folder with prompt "Select repository or folder")',
+            ],
+        ]
+        failures: list[str] = []
+        for args in scripts:
+            result = subprocess.run(
+                ["osascript", *args],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            stdout = result.stdout.strip()
+            stderr = result.stderr.strip()
+            if result.returncode == 0 and stdout:
+                return stdout
+            if "User canceled" in stderr:
+                return ""
+            if stderr:
+                failures.append(stderr)
+        message = failures[-1] if failures else "unknown error"
+        LOGGER.warning("macOS folder picker failed: %s", message)
+        raise RuntimeError(f"macOS folder picker failed: {message}")
 
     if platform.system() == "Windows":
         script = (

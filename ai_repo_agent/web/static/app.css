@@ -314,7 +314,9 @@ pre {
 #report-json,
 #report-md,
 #report-html,
-#install-hook {
+#install-hook,
+#scan-cancel,
+#trim-history {
   padding: 11px 14px;
   border-radius: 14px;
   background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
@@ -331,7 +333,9 @@ pre {
 #report-json:hover,
 #report-md:hover,
 #report-html:hover,
-#install-hook:hover {
+#install-hook:hover,
+#scan-cancel:hover,
+#trim-history:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 18px rgba(35, 119, 255, 0.18);
 }
@@ -341,7 +345,9 @@ pre {
 #install-hook,
 #report-json,
 #report-md,
-#report-html {
+#report-html,
+#scan-cancel,
+#trim-history {
   background: rgba(255, 255, 255, 0.08);
   color: inherit;
   border: 1px solid rgba(216, 224, 234, 0.12);
@@ -547,6 +553,19 @@ button:disabled {
   color: #ffe0db;
 }
 
+.scan-badge.canceled,
+.scan-badge.cancel_requested {
+  background: rgba(244, 177, 70, 0.18);
+  border-color: rgba(244, 177, 70, 0.24);
+  color: #ffe6bf;
+}
+
+.telemetry-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
 .progress-rail {
   width: 100%;
   height: 10px;
@@ -705,6 +724,10 @@ button:disabled {
 
 .compare-layout {
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+}
+
+.inspector-layout {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .memory-layout {

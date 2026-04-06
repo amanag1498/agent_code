@@ -6,6 +6,7 @@ const state = {
   currentFinding: null,
   currentPatchFinding: null,
   currentTreePath: null,
+  currentInspectPayload: null,
   activeScanJobId: null,
   activeScanPath: null,
   scanPollTimer: null,
@@ -18,6 +19,7 @@ const elements = {};
 document.addEventListener("DOMContentLoaded", async () => {
   bindElements();
   bindEvents();
+  toggleScanControls(false);
   await loadBootstrap();
 });
 
@@ -31,14 +33,14 @@ function bindElements() {
     "compare-new", "compare-fixed", "compare-unchanged", "compare-deps", "compare-deltas",
     "compare-summary", "compare-files", "compare-dependency-list", "memory-timeline",
     "memory-detail", "memory-symbols", "memory-chunks", "chat-output", "chat-question",
-    "chat-send", "patch-generate", "patch-output", "patch-selection", "refresh-logs", "log-output",
+    "chat-send", "patch-generate", "patch-output", "patch-selection", "patch-validation", "patch-alternatives", "patch-diff-preview", "refresh-logs", "log-output",
     "settings-form", "settings-provider", "settings-api-key", "settings-model", "settings-base-url", "settings-analyzer-backend",
     "settings-lsp-enabled", "settings-timeout", "settings-retries", "settings-max-findings", "settings-chunk-lines", "settings-watch",
-    "settings-log-level", "install-hook", "report-json", "report-md", "report-html",
+    "settings-log-level", "settings-worker-limit", "settings-retention-count", "install-hook", "trim-history", "report-json", "report-md", "report-html",
     "filter-severity", "filter-category", "filter-source", "repo-graph", "graph-summary",
-    "signal-bands", "tree-breadcrumb", "finding-kpis", "compare-insights",
+    "signal-bands", "tree-breadcrumb", "finding-kpis", "compare-insights", "compare-code-viewer", "compare-drift-view",
     "memory-constellation", "memory-constellation-summary", "scan-stage", "scan-badge",
-    "scan-progress-bar", "scan-status-text", "scan-percent", "scan-activity"
+    "scan-progress-bar", "scan-status-text", "scan-percent", "scan-activity", "scan-cancel"
   ];
   for (const id of ids) {
     elements[id] = document.getElementById(id);
@@ -68,9 +70,11 @@ function bindEvents() {
   elements["chat-send"].addEventListener("click", sendChat);
   elements["patch-generate"].addEventListener("click", generatePatch);
   elements["refresh-logs"].addEventListener("click", loadLogs);
+  elements["scan-cancel"].addEventListener("click", cancelScanJob);
   elements["settings-form"].addEventListener("submit", saveSettings);
   elements["settings-provider"].addEventListener("change", handleProviderChange);
   elements["install-hook"].addEventListener("click", installHook);
+  elements["trim-history"].addEventListener("click", trimHistory);
   elements["report-json"].addEventListener("click", () => downloadReport("json"));
   elements["report-md"].addEventListener("click", () => downloadReport("md"));
   elements["report-html"].addEventListener("click", () => downloadReport("html"));
@@ -136,7 +140,10 @@ async function browseFolder() {
     return;
   }
   const payload = await response.json();
-  if (!payload.path) return;
+  if (!payload.path) {
+    alert("Folder selection was canceled or no folder was returned.");
+    return;
+  }
   elements["scan-path"].value = payload.path;
   await runScan(payload.path);
 }
@@ -208,6 +215,29 @@ async function pollScanJob(jobId) {
     });
     alert(`Scan failed: ${payload.error || "Unknown error"}`);
   }
+  if (payload.status === "canceled") {
+    stopScanPolling();
+    toggleScanControls(false);
+    state.activeScanJobId = null;
+    setScanState({
+      status: "canceled",
+      stage: "Scan canceled",
+      progress: 100,
+      path: payload.path,
+      append: payload.error || "Scan canceled by user.",
+    });
+  }
+}
+
+async function cancelScanJob() {
+  if (!state.activeScanJobId) return;
+  await fetch(`/api/scan-jobs/${encodeURIComponent(state.activeScanJobId)}/cancel`, {method: "POST"});
+  setScanState({
+    status: "cancel_requested",
+    stage: "Cancel requested",
+    progress: Number(elements["scan-percent"].textContent.replace("%", "")) || 0,
+    append: "Cancellation requested for active scan job.",
+  });
 }
 
 async function fetchRepositories() {
@@ -282,6 +312,7 @@ function toggleScanControls(disabled) {
   document.querySelector('#scan-form button[type="submit"]').disabled = disabled;
   elements["rescan-button"].disabled = disabled;
   elements["browse-folder-button"].disabled = disabled;
+  elements["scan-cancel"].disabled = !disabled;
 }
 
 function renderCurrentPayload() {
@@ -353,6 +384,8 @@ function renderCurrentPayload() {
         `Risk Delta: ${compare.risk_delta ?? 0}`,
         "",
         compare.summary,
+        "",
+        ...(compare.architectural_drift || []),
       ].join("\n")
     : "No prior snapshot available for diff analysis.";
   elements["overview-top-findings"].textContent = findings.length
@@ -369,16 +402,31 @@ function renderCurrentPayload() {
   renderCompare(compare);
   renderMemory(payload);
   renderTree();
-  elements["patch-output"].textContent = patches.length
-    ? patches.slice(0, 6).map((patch) => `${patch.summary}\n${patch.suggested_diff}`).join("\n\n")
-    : "No patch suggestions yet.";
+  renderStoredPatchState(patches);
   elements["patch-selection"].textContent = state.currentPatchFinding
     ? formatPatchSelection(state.currentPatchFinding)
     : "Select a new or regressed finding from the Compare page to enable Patch Lab.";
+  elements["compare-code-viewer"].textContent = "Select a compare delta to inspect nearby code.";
+  elements["compare-drift-view"].textContent = buildCompareDrift(compare);
   elements["finding-detail"].textContent = "Select a finding to inspect its structured LLM judgment.";
   elements["file-detail"].textContent = "Select a file or folder.";
   elements["file-preview"].textContent = "Select a text file to preview its contents.";
   elements["chat-output"].innerHTML = "";
+}
+
+function renderStoredPatchState(patches) {
+  if (!patches.length) {
+    elements["patch-output"].textContent = "No patch suggestions yet.";
+    elements["patch-validation"].textContent = "No validation has been run yet.";
+    elements["patch-alternatives"].textContent = "No alternative patch options yet.";
+    elements["patch-diff-preview"].textContent = "Generate a patch to preview its diff.";
+    return;
+  }
+  const latest = patches[0];
+  elements["patch-output"].textContent = [latest.summary, latest.rationale || "", latest.suggested_diff].filter(Boolean).join("\n\n");
+  elements["patch-validation"].textContent = formatValidation(safeParseJson(latest.validation_json, {}));
+  elements["patch-alternatives"].textContent = formatAlternatives(safeParseJson(latest.alternatives_json, []));
+  elements["patch-diff-preview"].textContent = latest.suggested_diff || "No patch suggestions yet.";
 }
 
 function populateFilters(findings) {
@@ -442,6 +490,8 @@ function selectFinding(findingId) {
     `Category: ${state.currentFinding.category}`,
     `Source: ${state.currentFinding.scanner_name}`,
     `Fingerprint: ${state.currentFinding.fingerprint}`,
+    `Family: ${state.currentFinding.family_id || "n/a"}`,
+    `Evidence Quality: ${state.currentFinding.evidence_quality ?? "n/a"}`,
     "",
     "Structured Judgment",
     review
@@ -474,6 +524,7 @@ function renderCompare(compare) {
   renderChipList(elements["compare-files"], compare.changed_files || [], "No changed files detected.");
   renderChipList(elements["compare-dependency-list"], compare.changed_dependencies || [], "No changed dependencies detected.");
   renderCompareInsights(compare);
+  elements["compare-drift-view"].textContent = buildCompareDrift(compare);
 }
 
 function renderCompareDeltas(compare) {
@@ -507,13 +558,16 @@ function renderCompareDeltas(compare) {
   }
 }
 
-function selectCompareFinding(findingId) {
+async function selectCompareFinding(findingId) {
   const payload = state.currentPayload;
   if (!payload) return;
   state.currentPatchFinding = payload.findings.find((finding) => finding.id === findingId) || null;
   elements["patch-selection"].textContent = state.currentPatchFinding
     ? formatPatchSelection(state.currentPatchFinding)
     : "Select a new or regressed finding from the Compare page to enable Patch Lab.";
+  if (state.currentPatchFinding) {
+    await inspectCompareFinding(state.currentPatchFinding);
+  }
   renderCompare(payload.compare);
 }
 
@@ -525,6 +579,28 @@ function formatPatchSelection(finding) {
     `File: ${finding.file_path || "n/a"}`,
     `Lines: ${finding.line_start || "n/a"}-${finding.line_end || "n/a"}`,
     `Source: selected from Compare`,
+  ].join("\n");
+}
+
+async function inspectCompareFinding(finding) {
+  if (!state.currentRepository || !finding.file_path) {
+    elements["compare-code-viewer"].textContent = "Selected finding does not have file context.";
+    return;
+  }
+  const response = await fetch(
+    `/api/repositories/${state.currentRepository.id}/inspect?path=${encodeURIComponent(finding.file_path)}&line_start=${encodeURIComponent(finding.line_start || 1)}&line_end=${encodeURIComponent(finding.line_end || finding.line_start || 1)}`
+  );
+  if (!response.ok) {
+    elements["compare-code-viewer"].textContent = "Unable to load code context for the selected finding.";
+    return;
+  }
+  const payload = await response.json();
+  state.currentInspectPayload = payload;
+  elements["compare-code-viewer"].textContent = [
+    `${finding.file_path}`,
+    `Lines ${payload.line_start}-${payload.line_end}`,
+    "",
+    payload.snippet || "[empty snippet]",
   ].join("\n");
 }
 
@@ -714,7 +790,11 @@ async function generatePatch() {
     }),
   });
   const payload = await response.json();
-  elements["patch-output"].textContent = payload.patch || "No patch returned.";
+  const patchRecord = payload.patch_record || {};
+  elements["patch-output"].textContent = [patchRecord.summary, patchRecord.rationale, payload.patch].filter(Boolean).join("\n\n") || "No patch returned.";
+  elements["patch-validation"].textContent = formatValidation(patchRecord.validation || {});
+  elements["patch-alternatives"].textContent = formatAlternatives(patchRecord.alternatives || []);
+  elements["patch-diff-preview"].textContent = formatDiffPreview(patchRecord.diff_preview || []);
   await loadLogs();
 }
 
@@ -741,6 +821,8 @@ function applySettings(settings) {
   elements["settings-chunk-lines"].value = settings.embedding_chunk_lines || 80;
   elements["settings-watch"].value = String(Boolean(settings.watch_mode_enabled));
   elements["settings-log-level"].value = settings.logging_level || "INFO";
+  elements["settings-worker-limit"].value = settings.scan_worker_limit || 2;
+  elements["settings-retention-count"].value = settings.snapshot_retention_count || 12;
   handleProviderChange();
 }
 
@@ -792,6 +874,8 @@ async function saveSettings(event) {
     embedding_chunk_lines: Number(elements["settings-chunk-lines"].value || 80),
     watch_mode_enabled: elements["settings-watch"].value === "true",
     logging_level: elements["settings-log-level"].value,
+    scan_worker_limit: Number(elements["settings-worker-limit"].value || 2),
+    snapshot_retention_count: Number(elements["settings-retention-count"].value || 12),
   };
   const response = await fetch("/api/settings", {
     method: "POST",
@@ -818,6 +902,19 @@ async function installHook() {
   });
   const payload = await response.json();
   alert(`Installed hook at ${payload.hook_path}`);
+}
+
+async function trimHistory() {
+  if (!state.currentRepository) {
+    alert("Load a repository first.");
+    return;
+  }
+  const keep = Number(elements["settings-retention-count"].value || 12);
+  const response = await fetch(`/api/repositories/${state.currentRepository.id}/retention?keep_latest=${encodeURIComponent(keep)}`, {
+    method: "POST",
+  });
+  const payload = await response.json();
+  alert(`Deleted ${payload.deleted_snapshots} older snapshots. Kept ${payload.kept}.`);
 }
 
 function downloadReport(format) {
@@ -1100,6 +1197,11 @@ function renderCompareInsights(compare) {
       value: (compare.changed_dependencies || []).length,
       detail: "Dependencies added, removed, or version-changed.",
     },
+    {
+      label: "Reintroduced",
+      value: compare.trend_metadata?.reintroduced_findings || 0,
+      detail: "Finding families that resurfaced from older history.",
+    },
   ];
   container.innerHTML = cards.map((item) => `
     <article class="insight-card">
@@ -1108,6 +1210,55 @@ function renderCompareInsights(compare) {
       <div class="subtle">${escapeHtml(item.detail)}</div>
     </article>
   `).join("");
+}
+
+function buildCompareDrift(compare) {
+  if (!compare) return "No drift summary available yet.";
+  const lines = [
+    "Architectural Drift",
+    ...(compare.architectural_drift || []),
+    "",
+    "Semantic Signals",
+    ...(compare.semantic_summaries || []),
+  ];
+  const history = compare.trend_metadata?.history || [];
+  if (history.length) {
+    lines.push("", "Trend History");
+    for (const item of history.slice(-5)) {
+      lines.push(
+        `Snapshot ${item.snapshot_id}: findings=${item.findings_count}, high-risk=${item.high_risk_count}, changed=${item.changed_files_count}, reviews=${item.review_coverage}, patches=${item.patch_coverage}`
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
+function formatValidation(validation) {
+  const status = validation.status || "not_run";
+  const notes = validation.notes || [];
+  return [`Status: ${status}`, "", ...(notes.length ? notes : ["No validation notes available."])].join("\n");
+}
+
+function formatAlternatives(alternatives) {
+  if (!alternatives.length) return "No alternative patch options yet.";
+  return alternatives.map((item) => [
+    `${item.label || "Alternative"}`,
+    item.summary || "",
+    item.suggested_diff || "",
+  ].filter(Boolean).join("\n")).join("\n\n");
+}
+
+function formatDiffPreview(preview) {
+  if (!preview.length) return "No diff preview available.";
+  return preview.map((line) => line.text || "").join("\n");
+}
+
+function safeParseJson(text, fallback) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    return fallback;
+  }
 }
 
 function renderMemoryConstellation(payload) {

@@ -91,6 +91,10 @@ CREATE TABLE IF NOT EXISTS findings (
     fingerprint TEXT NOT NULL,
     raw_payload TEXT NOT NULL,
     status TEXT NOT NULL,
+    family_id TEXT NOT NULL DEFAULT '',
+    confidence REAL NOT NULL DEFAULT 0.0,
+    framework_tags_json TEXT NOT NULL DEFAULT '[]',
+    evidence_quality REAL NOT NULL DEFAULT 0.0,
     FOREIGN KEY(repo_snapshot_id) REFERENCES repo_snapshots(id)
 );
 
@@ -111,6 +115,18 @@ CREATE TABLE IF NOT EXISTS embedding_chunks (
     chunk_text TEXT NOT NULL,
     metadata_json TEXT NOT NULL,
     FOREIGN KEY(snapshot_id) REFERENCES repo_snapshots(id)
+);
+
+CREATE TABLE IF NOT EXISTS embedding_vectors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_id INTEGER NOT NULL,
+    chunk_id INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    vector_json TEXT NOT NULL,
+    vector_model TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    FOREIGN KEY(snapshot_id) REFERENCES repo_snapshots(id),
+    FOREIGN KEY(chunk_id) REFERENCES embedding_chunks(id)
 );
 
 CREATE TABLE IF NOT EXISTS architecture_rules (
@@ -169,6 +185,8 @@ CREATE TABLE IF NOT EXISTS patch_suggestions (
     rationale TEXT NOT NULL,
     suggested_diff TEXT NOT NULL,
     confidence REAL NOT NULL,
+    alternatives_json TEXT NOT NULL DEFAULT '[]',
+    validation_json TEXT NOT NULL DEFAULT '{}',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(snapshot_id) REFERENCES repo_snapshots(id),
     FOREIGN KEY(finding_id) REFERENCES findings(id)
@@ -211,5 +229,39 @@ def connect_database(path: str) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
     connection.row_factory = sqlite3.Row
     connection.executescript(SCHEMA_SQL)
+    _apply_additive_migrations(connection)
     connection.commit()
     return connection
+
+
+def _apply_additive_migrations(connection: sqlite3.Connection) -> None:
+    """Add additive columns required by newer app versions."""
+    _ensure_columns(
+        connection,
+        "findings",
+        {
+            "family_id": "TEXT NOT NULL DEFAULT ''",
+            "confidence": "REAL NOT NULL DEFAULT 0.0",
+            "framework_tags_json": "TEXT NOT NULL DEFAULT '[]'",
+            "evidence_quality": "REAL NOT NULL DEFAULT 0.0",
+        },
+    )
+    _ensure_columns(
+        connection,
+        "patch_suggestions",
+        {
+            "alternatives_json": "TEXT NOT NULL DEFAULT '[]'",
+            "validation_json": "TEXT NOT NULL DEFAULT '{}'",
+        },
+    )
+
+
+def _ensure_columns(connection: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
+    existing = {
+        row["name"]
+        for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    for name, definition in columns.items():
+        if name in existing:
+            continue
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")

@@ -83,6 +83,10 @@ class FindingRecord:
     fingerprint: str
     raw_payload: str
     status: str = FindingStatus.OPEN.value
+    family_id: str = ""
+    confidence: float = 0.0
+    framework_tags_json: str = "[]"
+    evidence_quality: float = 0.0
 
 
 @dataclass(slots=True)
@@ -103,6 +107,24 @@ class EmbeddingChunkRecord:
     file_path: str
     chunk_text: str
     metadata_json: str
+
+
+@dataclass(slots=True)
+class EmbeddingVectorRecord:
+    id: int | None
+    snapshot_id: int
+    chunk_id: int
+    file_path: str
+    vector_json: str
+    vector_model: str
+    content_hash: str
+
+
+@dataclass(slots=True)
+class RetrievalHit:
+    chunk: "EmbeddingChunkRecord"
+    score: float
+    reasons: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -181,6 +203,10 @@ class Finding:
     fingerprint: str
     raw_payload: dict[str, Any]
     status: FindingStatus = FindingStatus.OPEN
+    family_id: str = ""
+    confidence: float = 0.0
+    framework_tags: list[str] = field(default_factory=list)
+    evidence_quality: float = 0.0
 
 
 @dataclass(slots=True)
@@ -243,6 +269,9 @@ class CompareResult:
     changed_dependencies: list[str]
     summary: str
     risk_delta: float
+    semantic_summaries: list[str] = field(default_factory=list)
+    architectural_drift: list[str] = field(default_factory=list)
+    trend_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -307,6 +336,16 @@ class GeneratedFinding(BaseModel):
     remediation_summary: str
     related_change_risk: str
     needs_human_review: bool
+    framework_tags: list[str] = Field(default_factory=list)
+    evidence_quality: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class PatchAlternative(BaseModel):
+    """Alternative remediation strategy for a finding."""
+
+    label: str
+    summary: str
+    suggested_diff: str
 
 
 class FindingBatch(BaseModel):
@@ -332,6 +371,9 @@ class PatchSuggestion(BaseModel):
     suggested_diff: str
     confidence: float = Field(ge=0.0, le=1.0)
     needs_human_review: bool
+    alternatives: list[PatchAlternative] = Field(default_factory=list)
+    validation_status: str = "not_run"
+    validation_notes: list[str] = Field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -379,6 +421,8 @@ class PatchSuggestionRecord:
     suggested_diff: str
     confidence: float
     created_at: str
+    alternatives_json: str = "[]"
+    validation_json: str = "{}"
 
 
 @dataclass(slots=True)
@@ -396,6 +440,8 @@ class AppSettings:
     embedding_chunk_lines: int = 80
     watch_mode_enabled: bool = False
     logging_level: str = "INFO"
+    scan_worker_limit: int = 2
+    snapshot_retention_count: int = 12
 
     @staticmethod
     def now_iso() -> str:

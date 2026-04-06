@@ -13,6 +13,7 @@ from ai_repo_agent.core.models import (
     ChatSessionRecord,
     DependencyRecord,
     EmbeddingChunkRecord,
+    EmbeddingVectorRecord,
     FileRecord,
     FileVersionRecord,
     FindingDeltaRecord,
@@ -124,6 +125,32 @@ class SnapshotStore(BaseRepository):
         ).fetchall()
         return [RepoSnapshotRecord(**dict(row)) for row in rows]
 
+    def trim_repo_history(self, repo_id: int, keep_latest: int) -> int:
+        snapshots = self.list_for_repo(repo_id)
+        doomed = [snapshot.id for snapshot in snapshots[keep_latest:] if snapshot.id is not None]
+        if not doomed:
+            return 0
+        placeholders = ",".join("?" for _ in doomed)
+        self.connection.execute(
+            f"DELETE FROM finding_deltas WHERE current_finding_id IN (SELECT id FROM findings WHERE repo_snapshot_id IN ({placeholders})) "
+            f"OR previous_finding_id IN (SELECT id FROM findings WHERE repo_snapshot_id IN ({placeholders}))",
+            tuple(doomed + doomed),
+        )
+        for table in ("llm_reviews", "patch_suggestions", "chat_messages"):
+            if table == "chat_messages":
+                continue
+            self.connection.execute(f"DELETE FROM {table} WHERE snapshot_id IN ({placeholders})", tuple(doomed))
+        for table in ("findings", "dependencies", "symbols", "embedding_vectors", "embedding_chunks", "scan_runs"):
+            snapshot_column = "repo_snapshot_id" if table == "findings" else "snapshot_id"
+            self.connection.execute(f"DELETE FROM {table} WHERE {snapshot_column} IN ({placeholders})", tuple(doomed))
+        self.connection.execute(
+            f"DELETE FROM file_versions WHERE snapshot_id IN ({placeholders})",
+            tuple(doomed),
+        )
+        self.connection.execute(f"DELETE FROM repo_snapshots WHERE id IN ({placeholders})", tuple(doomed))
+        self.connection.commit()
+        return len(doomed)
+
 
 class FileStore(BaseRepository):
     """Persistence for files and file versions."""
@@ -231,7 +258,8 @@ class SymbolStore(BaseRepository):
 class EmbeddingStore(BaseRepository):
     """Persistence for chunked repo memory."""
 
-    def replace_for_snapshot(self, snapshot_id: int, chunks: list[EmbeddingChunkRecord]) -> None:
+    def replace_for_snapshot(self, snapshot_id: int, chunks: list[EmbeddingChunkRecord]) -> list[EmbeddingChunkRecord]:
+        self.connection.execute("DELETE FROM embedding_vectors WHERE snapshot_id = ?", (snapshot_id,))
         self.connection.execute("DELETE FROM embedding_chunks WHERE snapshot_id = ?", (snapshot_id,))
         self.connection.executemany(
             """
@@ -241,6 +269,7 @@ class EmbeddingStore(BaseRepository):
             [(c.snapshot_id, c.file_path, c.chunk_text, c.metadata_json) for c in chunks],
         )
         self.connection.commit()
+        return self.list_for_snapshot(snapshot_id)
 
     def list_for_snapshot(self, snapshot_id: int) -> list[EmbeddingChunkRecord]:
         rows = self.connection.execute(
@@ -248,6 +277,27 @@ class EmbeddingStore(BaseRepository):
             (snapshot_id,),
         ).fetchall()
         return [EmbeddingChunkRecord(**dict(row)) for row in rows]
+
+    def replace_vectors_for_snapshot(self, snapshot_id: int, vectors: list[EmbeddingVectorRecord]) -> None:
+        self.connection.execute("DELETE FROM embedding_vectors WHERE snapshot_id = ?", (snapshot_id,))
+        self.connection.executemany(
+            """
+            INSERT INTO embedding_vectors(snapshot_id, chunk_id, file_path, vector_json, vector_model, content_hash)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (vector.snapshot_id, vector.chunk_id, vector.file_path, vector.vector_json, vector.vector_model, vector.content_hash)
+                for vector in vectors
+            ],
+        )
+        self.connection.commit()
+
+    def list_vectors_for_snapshot(self, snapshot_id: int) -> list[EmbeddingVectorRecord]:
+        rows = self.connection.execute(
+            "SELECT * FROM embedding_vectors WHERE snapshot_id = ? ORDER BY id",
+            (snapshot_id,),
+        ).fetchall()
+        return [EmbeddingVectorRecord(**dict(row)) for row in rows]
 
 
 class FindingStore(BaseRepository):
@@ -259,8 +309,9 @@ class FindingStore(BaseRepository):
             cursor = self.connection.execute(
                 """
                 INSERT INTO findings(repo_snapshot_id, scanner_name, rule_id, title, description, severity,
-                    category, file_path, line_start, line_end, fingerprint, raw_payload, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    category, file_path, line_start, line_end, fingerprint, raw_payload, status,
+                    family_id, confidence, framework_tags_json, evidence_quality)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     snapshot_id,
@@ -276,6 +327,10 @@ class FindingStore(BaseRepository):
                     finding.fingerprint,
                     finding.raw_payload,
                     finding.status,
+                    finding.family_id,
+                    finding.confidence,
+                    finding.framework_tags_json,
+                    finding.evidence_quality,
                 ),
             )
             row = self.connection.execute("SELECT * FROM findings WHERE id = ?", (cursor.lastrowid,)).fetchone()
@@ -329,6 +384,12 @@ class ScanRunStore(BaseRepository):
             (status, message, finished_at, run_id),
         )
         self.connection.commit()
+
+    def list_for_snapshot(self, snapshot_id: int) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            "SELECT scanner_name, status, message, finished_at FROM scan_runs WHERE snapshot_id = ? ORDER BY id DESC",
+            (snapshot_id,),
+        ).fetchall()
 
 
 class ReviewStore(BaseRepository):
@@ -414,8 +475,11 @@ class PatchSuggestionStore(BaseRepository):
     def add(self, record: PatchSuggestionRecord) -> PatchSuggestionRecord:
         cursor = self.connection.execute(
             """
-            INSERT INTO patch_suggestions(snapshot_id, finding_id, summary, rationale, suggested_diff, confidence, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO patch_suggestions(
+                snapshot_id, finding_id, summary, rationale, suggested_diff, confidence,
+                alternatives_json, validation_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.snapshot_id,
@@ -424,6 +488,8 @@ class PatchSuggestionStore(BaseRepository):
                 record.rationale,
                 record.suggested_diff,
                 record.confidence,
+                record.alternatives_json,
+                record.validation_json,
                 record.created_at,
             ),
         )
@@ -457,6 +523,10 @@ class SettingsStore(BaseRepository):
             else:
                 defaults[key] = row["value"]
         return AppSettings(**defaults)
+
+    def delete_keys(self, keys: list[str]) -> None:
+        self.connection.executemany("DELETE FROM app_settings WHERE key = ?", [(key,) for key in keys])
+        self.connection.commit()
 
     def save(self, settings: AppSettings) -> None:
         self.connection.executemany(

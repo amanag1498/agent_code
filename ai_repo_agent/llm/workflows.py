@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,8 @@ from typing import Callable
 from ai_repo_agent.core.enums import ReviewTargetType
 from ai_repo_agent.core.models import (
     EmbeddingChunkRecord,
+    EmbeddingVectorRecord,
+    RetrievalHit,
     FindingBatch,
     FindingRecord,
     GeneratedFinding,
@@ -43,19 +46,23 @@ class LLMFindingGenerator:
         snapshot: RepoSnapshotRecord,
         symbols: list[SymbolRecord],
         chunks: list[EmbeddingChunkRecord],
+        vectors: list[EmbeddingVectorRecord],
         architecture_observations: list[str],
         dependency_summary: list[dict],
         focus_file_paths: set[str] | None = None,
         progress_callback: Callable[[str, int], None] | None = None,
     ) -> tuple[list[GeneratedFinding], str]:
+        scan_metadata = self._scan_metadata(snapshot)
         evidence_batches = self.evidence_builder.build_repo_analysis_batches(
             repo_root=repo_root,
             snapshot=snapshot,
             symbols=symbols,
             chunks=chunks,
+            vectors=vectors,
             architecture_observations=architecture_observations,
             dependency_summary=dependency_summary,
             focus_file_paths=focus_file_paths,
+            frameworks=scan_metadata.get("frameworks", []),
             max_batches=5,
             batch_size=4,
         )
@@ -63,8 +70,10 @@ class LLMFindingGenerator:
             repo_root=repo_root,
             snapshot=snapshot,
             chunks=chunks,
+            vectors=vectors,
             dependency_summary=dependency_summary,
             focus_file_paths=focus_file_paths,
+            frameworks=scan_metadata.get("frameworks", []),
         )
         combined_batches = [(evidence, evidence_hash, "general") for evidence, evidence_hash in evidence_batches]
         combined_batches.extend((evidence, evidence_hash, "specialized") for evidence, evidence_hash in specialized_batches)
@@ -118,7 +127,7 @@ class LLMFindingGenerator:
                     f"Consolidating batch {index}/{len(combined_batches)}",
                     64 + int(index * 14 / max(1, len(combined_batches))),
                 )
-            for finding in self._dedupe_and_rank(batch.findings if batch else []):
+            for finding in self._dedupe_and_rank(self._calibrate_findings(batch.findings if batch else [], scan_metadata)):
                 dedupe_key = f"{finding.rule_id}|{finding.file_path}|{finding.line_start}|{finding.title}"
                 if dedupe_key in seen:
                     continue
@@ -172,11 +181,95 @@ class LLMFindingGenerator:
             findings,
             key=lambda finding: (
                 severity_rank.get(finding.severity.value, 0),
+                finding.evidence_quality,
                 finding.confidence,
                 not finding.needs_human_review,
             ),
             reverse=True,
         )
+
+    @staticmethod
+    def _scan_metadata(snapshot: RepoSnapshotRecord) -> dict:
+        try:
+            return json.loads(snapshot.scan_metadata or "{}")
+        except Exception:
+            return {}
+
+    def _calibrate_findings(self, findings: list[GeneratedFinding], scan_metadata: dict) -> list[GeneratedFinding]:
+        frameworks = {str(item).lower() for item in scan_metadata.get("frameworks", [])}
+        calibrated: list[GeneratedFinding] = []
+        seen_families: set[str] = set()
+        for finding in findings:
+            evidence_quality = self._evidence_quality(finding, frameworks)
+            confidence = min(0.99, round((finding.confidence * 0.65) + (evidence_quality * 0.35), 3))
+            if evidence_quality < 0.22 and confidence < 0.35:
+                continue
+            framework_tags = self._framework_tags(finding, frameworks)
+            updated = finding.model_copy(
+                update={
+                    "confidence": confidence,
+                    "evidence_quality": evidence_quality,
+                    "framework_tags": framework_tags,
+                    "needs_human_review": finding.needs_human_review or evidence_quality < 0.45,
+                }
+            )
+            family_id = self.family_id(updated)
+            if family_id in seen_families and confidence < 0.6:
+                continue
+            seen_families.add(family_id)
+            calibrated.append(updated)
+        return calibrated
+
+    @staticmethod
+    def family_id(finding: GeneratedFinding | FindingRecord) -> str:
+        title = " ".join((getattr(finding, "title", "") or "").lower().split()[:8])
+        category = getattr(finding, "category", "") or ""
+        path = getattr(finding, "file_path", "") or "repo"
+        rule_id = getattr(finding, "rule_id", "") or "generic"
+        family_basis = f"{category}|{rule_id}|{path.rsplit('/', 1)[0]}|{title}"
+        return hashlib.sha1(family_basis.encode("utf-8")).hexdigest()[:16]
+
+    @staticmethod
+    def _framework_tags(finding: GeneratedFinding, frameworks: set[str]) -> list[str]:
+        haystack = " ".join(
+            [
+                finding.title.lower(),
+                finding.description.lower(),
+                (finding.file_path or "").lower(),
+            ]
+        )
+        tags = [framework for framework in frameworks if framework in haystack]
+        if not tags:
+            if "django" in haystack:
+                tags.append("django")
+            if "fastapi" in haystack or "pydantic" in haystack:
+                tags.append("fastapi")
+            if "express" in haystack or "middleware" in haystack:
+                tags.append("express")
+            if "react" in haystack or "next" in haystack:
+                tags.append("react_next")
+            if "spring" in haystack or "controller" in haystack:
+                tags.append("spring")
+        return sorted(set(tags))
+
+    @staticmethod
+    def _evidence_quality(finding: GeneratedFinding, frameworks: set[str]) -> float:
+        score = 0.15
+        if finding.file_path:
+            score += 0.2
+        if finding.line_start is not None:
+            score += 0.15
+        if len(finding.reasoning_summary.split()) >= 10:
+            score += 0.15
+        if len(finding.remediation_summary.split()) >= 8:
+            score += 0.1
+        if finding.verdict.value in {"true_positive", "likely_true_positive"}:
+            score += 0.1
+        if finding.framework_tags:
+            score += 0.05
+        if frameworks and any(tag in frameworks for tag in finding.framework_tags):
+            score += 0.1
+        return round(min(score, 1.0), 3)
 
 
 class RepoChatLLMService:
@@ -188,8 +281,8 @@ class RepoChatLLMService:
         self.evidence_builder = EvidenceBuilder()
         self.prompt_builder = PromptBuilder()
 
-    def answer(self, question: str, chunks: list[EmbeddingChunkRecord], history: list[dict[str, str]]) -> RepoChatResponse:
-        evidence, evidence_hash = self.evidence_builder.build_chat_evidence(question, chunks, history)
+    def answer(self, question: str, hits: list[RetrievalHit], history: list[dict[str, str]]) -> RepoChatResponse:
+        evidence, evidence_hash = self.evidence_builder.build_chat_evidence(question, hits, history)
         cached = self.review_store.get_cache(evidence_hash)
         if cached:
             return RepoChatResponse.model_validate(cached)
@@ -216,6 +309,7 @@ class PatchSuggestionLLMService:
         related_chunks: list[EmbeddingChunkRecord],
         related_symbols,
         patch_context: dict,
+        retrieval_hits: list[RetrievalHit],
         snapshot_id: int,
     ) -> PatchSuggestionRecord:
         evidence, evidence_hash = self.evidence_builder.build_patch_evidence(
@@ -224,6 +318,7 @@ class PatchSuggestionLLMService:
             related_chunks,
             related_symbols,
             patch_context,
+            retrieval_hits,
         )
         cached = self.review_store.get_cache(evidence_hash)
         if cached:
@@ -241,6 +336,13 @@ class PatchSuggestionLLMService:
                 rationale=response.rationale,
                 suggested_diff=response.suggested_diff,
                 confidence=response.confidence,
+                alternatives_json=json.dumps([item.model_dump(mode="json") for item in response.alternatives]),
+                validation_json=json.dumps(
+                    {
+                        "status": response.validation_status,
+                        "notes": response.validation_notes,
+                    }
+                ),
                 created_at=datetime.utcnow().isoformat(timespec="seconds"),
             )
         )

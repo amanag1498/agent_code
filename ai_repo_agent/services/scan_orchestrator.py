@@ -13,6 +13,7 @@ from ai_repo_agent.analysis.architecture import ArchitectureMapper
 from ai_repo_agent.analysis.chunks import ChunkBuilder
 from ai_repo_agent.analysis.code_analysis import create_code_analyzer
 from ai_repo_agent.analysis.diff import DiffService
+from ai_repo_agent.analysis.embeddings import LocalEmbeddingModel
 from ai_repo_agent.analysis.risk import RiskScoringEngine
 from ai_repo_agent.analysis.summary import SummaryBuilder
 from ai_repo_agent.analysis.symbols import SymbolIndexer
@@ -21,6 +22,7 @@ from ai_repo_agent.core.models import (
     AppSettings,
     DependencyRecord,
     EmbeddingChunkRecord,
+    EmbeddingVectorRecord,
     FileRecord,
     FileInventoryItem,
     FileVersionRecord,
@@ -85,11 +87,18 @@ class ScanOrchestrator:
         self.diff_service = DiffService()
         self.summary_builder = SummaryBuilder()
         self.architecture_mapper = ArchitectureMapper()
+        self.embedding_model = LocalEmbeddingModel()
         self.analyzer = create_code_analyzer(settings)
         self.symbol_indexer = SymbolIndexer(self.analyzer)
         self.chunk_builder = ChunkBuilder(self.analyzer)
 
-    def scan(self, path: str, progress_callback: Callable[[str, int], None] | None = None) -> ScanResult:
+    def scan(
+        self,
+        path: str,
+        progress_callback: Callable[[str, int], None] | None = None,
+        cancel_callback: Callable[[], bool] | None = None,
+    ) -> ScanResult:
+        self._check_cancel(cancel_callback)
         self._progress(progress_callback, "Loading repository context", 5)
         LOGGER.info("Loading repository context for %s", path)
         repo_context = self.loader.load(path)
@@ -128,6 +137,7 @@ class ScanOrchestrator:
         self._progress(progress_callback, "Persisting file inventory", 18)
         self._persist_files(snapshot.id or 0, repository.id or 0, repo_context.files)
         LOGGER.info("Persisted file inventory for snapshot %s", snapshot.id)
+        self._check_cancel(cancel_callback)
         changed_focus_paths = self._determine_focus_paths(
             previous_snapshot=previous_snapshot,
             current_snapshot=snapshot,
@@ -147,6 +157,7 @@ class ScanOrchestrator:
         ]
         self.dependency_store.replace_for_snapshot(snapshot.id or 0, dep_records)
         LOGGER.info("Persisted %s dependencies for snapshot %s", len(dep_records), snapshot.id)
+        self._check_cancel(cancel_callback)
 
         self._progress(progress_callback, f"Indexing symbols via {self.analyzer.backend_name}", 40)
         symbols = self.symbol_indexer.index(repo_context.path, repo_context.files)
@@ -166,10 +177,11 @@ class ScanOrchestrator:
             ],
         )
         LOGGER.info("Persisted %s symbols for snapshot %s", len(symbols), snapshot.id)
+        self._check_cancel(cancel_callback)
 
         self._progress(progress_callback, f"Building code memory via {self.analyzer.backend_name}", 52)
         chunks = self.chunk_builder.build(repo_context.path, repo_context.files, max_lines=self.settings.embedding_chunk_lines)
-        self.embedding_store.replace_for_snapshot(
+        stored_chunks = self.embedding_store.replace_for_snapshot(
             snapshot.id or 0,
             [
                 EmbeddingChunkRecord(
@@ -182,7 +194,16 @@ class ScanOrchestrator:
                 for chunk in chunks
             ],
         )
+        self.embedding_store.replace_vectors_for_snapshot(
+            snapshot.id or 0,
+            [
+                self.embedding_model.build_vector_record(snapshot.id or 0, chunk)
+                for chunk in stored_chunks
+                if chunk.id is not None
+            ],
+        )
         LOGGER.info("Persisted %s code chunks for snapshot %s", len(chunks), snapshot.id)
+        self._check_cancel(cancel_callback)
 
         architecture_observations = self.architecture_mapper.observe(repo_context.files)
         provider = self._provider()
@@ -209,6 +230,7 @@ class ScanOrchestrator:
             )
             stored_symbols = self.symbol_store.list_for_snapshot(snapshot.id or 0)
             stored_chunks = self.embedding_store.list_for_snapshot(snapshot.id or 0)
+            stored_vectors = self.embedding_store.list_vectors_for_snapshot(snapshot.id or 0)
             generator = LLMFindingGenerator(provider, self.review_store, self.settings.llm_max_findings_per_scan)
             try:
                 generated, evidence_hash = generator.generate(
@@ -216,6 +238,7 @@ class ScanOrchestrator:
                     snapshot=snapshot,
                     symbols=stored_symbols,
                     chunks=stored_chunks,
+                    vectors=stored_vectors,
                     architecture_observations=architecture_observations,
                     dependency_summary=[asdict(dep) for dep in dep_records],
                     focus_file_paths=changed_focus_paths,
@@ -235,6 +258,10 @@ class ScanOrchestrator:
                         fingerprint=self._fingerprint(item),
                         raw_payload=item.model_dump(mode="json"),
                         status=FindingStatus.OPEN,
+                        family_id=generator.family_id(item),
+                        confidence=item.confidence,
+                        framework_tags=item.framework_tags,
+                        evidence_quality=item.evidence_quality,
                     )
                     for item in generated
                 ]
@@ -256,6 +283,10 @@ class ScanOrchestrator:
                             fingerprint=finding.fingerprint,
                             raw_payload=json.dumps(finding.raw_payload),
                             status=finding.status.value,
+                            family_id=finding.family_id,
+                            confidence=finding.confidence,
+                            framework_tags_json=json.dumps(finding.framework_tags),
+                            evidence_quality=finding.evidence_quality,
                         )
                         for finding in findings
                     ],
@@ -288,6 +319,7 @@ class ScanOrchestrator:
             self._progress(progress_callback, "Skipping LLM stage", 74)
 
         self._progress(progress_callback, "Comparing with previous snapshot", 86)
+        self._check_cancel(cancel_callback)
         previous_snapshot = self.snapshot_store.previous_for_repo(repository.id or 0, snapshot.id or 0)
         previous_findings = self.finding_store.list_for_snapshot(previous_snapshot.id) if previous_snapshot else []
         previous_dependencies = self.dependency_store.list_for_snapshot(previous_snapshot.id) if previous_snapshot else []
@@ -314,6 +346,7 @@ class ScanOrchestrator:
         if provider:
             try:
                 self._progress(progress_callback, "Building repo-level review", 94)
+                self._check_cancel(cancel_callback)
                 repo_judge = RepoJudge(provider, self.review_store)
                 repo_judge.review(snapshot, compare_result.summary, stored_findings[:5])
                 LOGGER.info("Repo-level LLM review completed for snapshot %s", snapshot.id)
@@ -394,6 +427,11 @@ class ScanOrchestrator:
     def _progress(progress_callback: Callable[[str, int], None] | None, stage: str, progress: int) -> None:
         if progress_callback:
             progress_callback(stage, progress)
+
+    @staticmethod
+    def _check_cancel(cancel_callback: Callable[[], bool] | None) -> None:
+        if cancel_callback and cancel_callback():
+            raise RuntimeError("Scan canceled by user.")
 
     @staticmethod
     def _fingerprint(item) -> str:

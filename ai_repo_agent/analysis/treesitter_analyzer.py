@@ -15,6 +15,7 @@ LOGGER = logging.getLogger(__name__)
 LANGUAGE_ALIASES = {
     "python": "python",
     "javascript": "javascript",
+    "jsx": "javascript",
     "typescript": "typescript",
     "tsx": "tsx",
     "java": "java",
@@ -32,6 +33,7 @@ IMPORT_NODE_TYPES = {
     "use_declaration",
     "preproc_include",
     "package_clause",
+    "using_declaration",
 }
 
 SYMBOL_NODE_MAP = {
@@ -52,6 +54,9 @@ SYMBOL_NODE_MAP = {
     "type_declaration": "type",
     "lexical_declaration": "binding",
     "variable_declaration": "binding",
+    "generator_function_declaration": "function",
+    "arrow_function": "function",
+    "function_signature": "function",
 }
 
 
@@ -99,7 +104,11 @@ class TreeSitterCodeAnalyzer(CodeStructureAnalyzer):
             imports=imports[:24],
             comments=comments[:12],
             code_units=code_units,
-            metadata={"backend": self.backend_name, "parser_language": LANGUAGE_ALIASES.get(item.language, item.language)},
+            metadata={
+                "backend": self.backend_name,
+                "parser_language": LANGUAGE_ALIASES.get(item.language, item.language),
+                "decorators": self._collect_annotations(root, text)[:20],
+            },
         )
         return self.semantic_analyzer.enrich_file(repo_root, item, structure)
 
@@ -162,6 +171,14 @@ class TreeSitterCodeAnalyzer(CodeStructureAnalyzer):
                     imports=imports[:16],
                     comments=self._leading_comments_for(node, comments),
                     parent_name=self._parent_symbol_name(node, text),
+                    semantic={
+                        "annotations": self._node_annotations(node, text),
+                        "doc_comment": self._leading_comments_for(node, comments)[:1],
+                        "span": {
+                            "start_byte": node.start_byte,
+                            "end_byte": node.end_byte,
+                        },
+                    },
                 )
             )
         return self._dedupe_units(units)
@@ -179,6 +196,13 @@ class TreeSitterCodeAnalyzer(CodeStructureAnalyzer):
             if node.type in {"comment", "line_comment", "block_comment"}:
                 comments.append(text[node.start_byte : node.end_byte].strip())
         return comments[:20]
+
+    def _collect_annotations(self, root, text: str) -> list[str]:
+        annotations: list[str] = []
+        for node in self._walk(root):
+            if node.type in {"decorator", "annotation"}:
+                annotations.append(text[node.start_byte : node.end_byte].strip())
+        return annotations
 
     def _fallback_structure(self, item: FileInventoryItem, text: str) -> FileStructureDescriptor:
         imports = [line.strip() for line in text.splitlines()[:60] if line.strip().startswith(("import ", "from ", "#include", "use "))]
@@ -259,6 +283,16 @@ class TreeSitterCodeAnalyzer(CodeStructureAnalyzer):
     def _leading_comments_for(node, comments: list[str]) -> list[str]:
         del node
         return comments[:4]
+
+    @staticmethod
+    def _node_annotations(node, text: str) -> list[str]:
+        annotations: list[str] = []
+        for child in getattr(node, "children", []):
+            if child.type in {"decorator", "annotation"}:
+                value = text[child.start_byte : child.end_byte].strip()
+                if value:
+                    annotations.append(value)
+        return annotations[:4]
 
     @staticmethod
     def _dedupe_symbols(symbols: list[SymbolDescriptor]) -> list[SymbolDescriptor]:

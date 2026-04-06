@@ -118,7 +118,10 @@
               <p class="eyebrow">Live Activity</p>
               <h3 id="scan-stage">Idle</h3>
             </div>
-            <span id="scan-badge" class="scan-badge idle">Ready</span>
+            <div class="telemetry-actions">
+              <span id="scan-badge" class="scan-badge idle">Ready</span>
+              <button id="scan-cancel" type="button" class="ghost">Cancel</button>
+            </div>
           </div>
           <div class="telemetry-body">
             <div class="telemetry-progress-column">
@@ -359,6 +362,17 @@
                 </article>
               </div>
             </div>
+
+            <div class="compare-layout inspector-layout">
+              <article class="surface compact-surface">
+                <div class="surface-head"><div><p class="eyebrow">Code Inspector</p><h3>Selected compare finding context</h3></div></div>
+                <pre id="compare-code-viewer">Select a compare delta to inspect nearby code.</pre>
+              </article>
+              <article class="surface compact-surface">
+                <div class="surface-head"><div><p class="eyebrow">Drift</p><h3>Architectural drift and trends</h3></div></div>
+                <pre id="compare-drift-view">No drift summary available yet.</pre>
+              </article>
+            </div>
           </section>
 
           <section id="page-memory" class="page">
@@ -438,6 +452,22 @@
                 <pre id="patch-output">No patch suggestions yet.</pre>
               </article>
             </div>
+
+            <div class="patch-layout inspector-layout">
+              <article class="surface compact-surface">
+                <div class="surface-head"><div><p class="eyebrow">Validation</p><h3>Patch validation status</h3></div></div>
+                <pre id="patch-validation">No validation has been run yet.</pre>
+              </article>
+              <article class="surface compact-surface">
+                <div class="surface-head"><div><p class="eyebrow">Alternatives</p><h3>Alternative remediation options</h3></div></div>
+                <pre id="patch-alternatives">No alternative patch options yet.</pre>
+              </article>
+            </div>
+
+            <article class="surface compact-surface">
+              <div class="surface-head"><div><p class="eyebrow">Diff Preview</p><h3>Unified diff preview</h3></div></div>
+              <pre id="patch-diff-preview">Generate a patch to preview its diff.</pre>
+            </article>
           </section>
 
           <section id="page-logs" class="page">
@@ -511,7 +541,10 @@
                       <option value="ERROR">ERROR</option>
                     </select>
                   </label>
+                  <label>Scan Worker Limit<input id="settings-worker-limit" type="number"></label>
+                  <label>Snapshot Retention Count<input id="settings-retention-count" type="number"></label>
                   <div class="settings-actions stretch-actions">
+                    <button type="button" id="trim-history" class="ghost">Trim Repo History</button>
                     <button type="button" id="install-hook" class="ghost">Install Pre-Commit Hook</button>
                     <button type="submit">Save Settings</button>
                   </div>

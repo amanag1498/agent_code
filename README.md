@@ -125,6 +125,7 @@ python main.py
 ## Main Components
 
 - `analysis`: local heuristics, analyzer abstractions, Tree-sitter/legacy AST parsing, optional LSP enrichment, chunking, diff logic, summary and risk scoring
+- `analysis`: local heuristics, analyzer abstractions, Tree-sitter/legacy AST parsing, optional LSP enrichment, local embeddings, chunking, diff logic, summary and risk scoring
 - `db`: SQLite schema and repository helpers
 - `llm`: provider factory, grounded prompt building, evidence packaging, and structured workflows
 - `repo`: repo loading, git service, inventory, fingerprinting
@@ -138,6 +139,7 @@ The analysis pipeline has been migrated behind a pluggable analyzer layer.
 
 - Structural parsing now prefers Tree-sitter
 - Semantic enrichment is handled by an optional LSP layer
+- Chunk retrieval is backed by local deterministic embeddings plus heuristic ranking
 - The legacy AST backend is preserved behind `legacy_ast`
 - Existing snapshot, memory, findings, patch, and UI flows remain intact
 

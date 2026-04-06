@@ -8,7 +8,8 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ai_repo_agent.core.models import EmbeddingChunkRecord, FindingRecord, RepoSnapshotRecord, SymbolRecord
+from ai_repo_agent.analysis.embeddings import EmbeddingRetrievalService
+from ai_repo_agent.core.models import EmbeddingChunkRecord, EmbeddingVectorRecord, FindingRecord, RepoSnapshotRecord, RetrievalHit, SymbolRecord
 
 
 class EvidenceBuilder:
@@ -41,6 +42,16 @@ class EvidenceBuilder:
         "dependency": ("package", "requirement", "dependency", "lock", "version", "manifest", "import"),
         "secrets_config": ("secret", "config", "env", "credential", "key", "password", "vault", "setting"),
     }
+    FRAMEWORK_PASSES = {
+        "fastapi": ("fastapi", "router", "depends", "pydantic", "request", "response"),
+        "django": ("django", "serializer", "queryset", "view", "model", "middleware"),
+        "express": ("express", "middleware", "req", "res", "router", "next"),
+        "react_next": ("react", "next", "useeffect", "server component", "api route", "props"),
+        "spring": ("spring", "controller", "repository", "service", "bean", "autowired"),
+    }
+
+    def __init__(self) -> None:
+        self.retrieval = EmbeddingRetrievalService()
 
     def build_finding_evidence(
         self,
@@ -157,13 +168,20 @@ class EvidenceBuilder:
         snapshot: RepoSnapshotRecord,
         symbols: list[SymbolRecord],
         chunks: list[EmbeddingChunkRecord],
+        vectors: list[EmbeddingVectorRecord],
         architecture_observations: list[str],
         dependency_summary: list[dict[str, Any]],
         focus_file_paths: set[str] | None = None,
+        frameworks: list[str] | None = None,
         max_batches: int = 4,
         batch_size: int = 4,
     ) -> list[tuple[dict[str, Any], str]]:
-        prioritized = self._prioritize_chunks(chunks, focus_file_paths or set())
+        prioritized = self._prioritize_chunks(
+            chunks,
+            focus_file_paths or set(),
+            self._retrieval_query(snapshot, architecture_observations, dependency_summary, focus_file_paths),
+            vectors,
+        )
         chunk_groups = self._build_module_clusters(prioritized, batch_size=batch_size, max_groups=max_batches)
         if not chunk_groups:
             chunk_groups = [[]]
@@ -178,6 +196,7 @@ class EvidenceBuilder:
                     "repo_root": str(repo_root),
                     "focus_files": sorted(file_paths),
                     "requested_focus_files": sorted(focus_file_paths or set())[:40],
+                    "frameworks": sorted(frameworks or []),
                 },
                 "snapshot": {
                     "branch": snapshot.branch,
@@ -215,13 +234,25 @@ class EvidenceBuilder:
         repo_root: Path,
         snapshot: RepoSnapshotRecord,
         chunks: list[EmbeddingChunkRecord],
+        vectors: list[EmbeddingVectorRecord],
         dependency_summary: list[dict[str, Any]],
         focus_file_paths: set[str] | None = None,
+        frameworks: list[str] | None = None,
     ) -> list[tuple[dict[str, Any], str]]:
         del repo_root
-        prioritized = self._prioritize_chunks(chunks, focus_file_paths or set())
+        prioritized = self._prioritize_chunks(
+            chunks,
+            focus_file_paths or set(),
+            self._retrieval_query(snapshot, [], dependency_summary, focus_file_paths),
+            vectors,
+        )
         results: list[tuple[dict[str, Any], str]] = []
-        for focus_name, terms in self.SPECIALIZED_PASSES.items():
+        focus_definitions = dict(self.SPECIALIZED_PASSES)
+        for framework in frameworks or []:
+            terms = self.FRAMEWORK_PASSES.get(str(framework).lower())
+            if terms:
+                focus_definitions[f"framework_{framework.lower()}"] = terms
+        for focus_name, terms in focus_definitions.items():
             relevant = [chunk for chunk in prioritized if self._matches_focus(chunk, terms)][:4]
             if focus_name == "dependency" and not relevant and dependency_summary:
                 relevant = prioritized[:2]
@@ -237,6 +268,7 @@ class EvidenceBuilder:
                 },
                 "dependencies": dependency_summary[:16],
                 "focus_terms": list(terms),
+                "frameworks": sorted(frameworks or []),
                 "code_chunks": [
                     {
                         "file_path": chunk.file_path,
@@ -253,26 +285,21 @@ class EvidenceBuilder:
     def build_chat_evidence(
         self,
         question: str,
-        chunks: list[EmbeddingChunkRecord],
+        hits: list[RetrievalHit],
         history: list[dict[str, str]],
     ) -> tuple[dict, str]:
-        question_terms = self._question_terms(question)
-        ranked = sorted(
-            chunks,
-            key=lambda chunk: self._chat_chunk_score(chunk, question_terms),
-            reverse=True,
-        )
-        diversified = self._diversify_chunks(ranked, limit=8)
         evidence = {
             "question": question,
             "history": history[-6:],
             "retrieved_chunks": [
                 {
-                    "file_path": chunk.file_path,
-                    "chunk_text": chunk.chunk_text[:1700],
-                    "metadata": self._safe_metadata(chunk.metadata_json),
+                    "file_path": hit.chunk.file_path,
+                    "chunk_text": hit.chunk.chunk_text[:1700],
+                    "metadata": self._safe_metadata(hit.chunk.metadata_json),
+                    "retrieval_score": round(hit.score, 4),
+                    "retrieval_reasons": hit.reasons,
                 }
-                for chunk in diversified
+                for hit in hits[:8]
             ],
         }
         evidence_hash = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode("utf-8")).hexdigest()
@@ -285,6 +312,7 @@ class EvidenceBuilder:
         related_chunks: list[EmbeddingChunkRecord],
         related_symbols: list[SymbolRecord],
         patch_context: dict[str, Any],
+        retrieval_hits: list[RetrievalHit] | None = None,
     ) -> tuple[dict, str]:
         snippet = ""
         if finding.file_path:
@@ -325,11 +353,39 @@ class EvidenceBuilder:
                 for symbol in related_symbols[:12]
             ],
             "patch_context": patch_context,
+            "retrieval_hits": [
+                {
+                    "file_path": hit.chunk.file_path,
+                    "score": round(hit.score, 4),
+                    "reasons": hit.reasons,
+                }
+                for hit in (retrieval_hits or [])[:8]
+            ],
         }
         evidence_hash = hashlib.sha256(json.dumps(evidence, sort_keys=True).encode("utf-8")).hexdigest()
         return evidence, evidence_hash
 
-    def _prioritize_chunks(self, chunks: list[EmbeddingChunkRecord], focus_file_paths: set[str]) -> list[EmbeddingChunkRecord]:
+    def _prioritize_chunks(
+        self,
+        chunks: list[EmbeddingChunkRecord],
+        focus_file_paths: set[str],
+        retrieval_query: str,
+        vectors: list[EmbeddingVectorRecord],
+    ) -> list[EmbeddingChunkRecord]:
+        if vectors:
+            hits = self.retrieval.rank_for_query(retrieval_query, chunks, vectors, file_priority=focus_file_paths, limit=min(len(chunks), 48))
+            prioritized_ids = [hit.chunk.id for hit in hits if hit.chunk.id is not None]
+            prioritized = [chunk for chunk in chunks if chunk.id in prioritized_ids]
+            if prioritized:
+                remainder = [chunk for chunk in chunks if chunk.id not in set(prioritized_ids)]
+                remainder.sort(
+                    key=lambda chunk: (
+                        -self._chunk_priority_score(chunk, focus_file_paths),
+                        len(chunk.chunk_text),
+                        chunk.file_path,
+                    ),
+                )
+                return prioritized + remainder
         return sorted(
             chunks,
             key=lambda chunk: (
@@ -386,6 +442,22 @@ class EvidenceBuilder:
     def _matches_focus(self, chunk: EmbeddingChunkRecord, terms: tuple[str, ...]) -> bool:
         haystack = f"{chunk.file_path}\n{chunk.chunk_text}\n{chunk.metadata_json}".lower()
         return any(term in haystack for term in terms)
+
+    @staticmethod
+    def _retrieval_query(
+        snapshot: RepoSnapshotRecord,
+        architecture_observations: list[str],
+        dependency_summary: list[dict[str, Any]],
+        focus_file_paths: set[str] | None,
+    ) -> str:
+        parts = [
+            snapshot.summary or "",
+            snapshot.diff_summary or "",
+            " ".join(sorted(focus_file_paths or set())[:20]),
+            " ".join(architecture_observations[:6]),
+            " ".join(dep.get("name", "") for dep in dependency_summary[:12]),
+        ]
+        return "\n".join(part for part in parts if part)
 
     def _chat_chunk_score(self, chunk: EmbeddingChunkRecord, question_terms: set[str]) -> int:
         haystack = f"{chunk.file_path}\n{chunk.chunk_text}\n{chunk.metadata_json}".lower()

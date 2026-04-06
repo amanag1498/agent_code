@@ -30,6 +30,8 @@ class PromptBuilder:
             '"file_path":"string|null","line_start":1,"line_end":1,'
             '"verdict":"true_positive|likely_true_positive|uncertain|likely_false_positive|false_positive",'
             '"confidence":0.0,'
+            '"framework_tags":["string"],'
+            '"evidence_quality":0.0,'
             '"severity_override":"critical|high|medium|low|info|unchanged",'
             '"impact_summary":"string","reasoning_summary":"string","remediation_summary":"string",'
             '"related_change_risk":"string","needs_human_review":true'
@@ -50,6 +52,8 @@ class PromptBuilder:
             "{"
             '"verdict":"true_positive|likely_true_positive|uncertain|likely_false_positive|false_positive",'
             '"confidence":0.0,'
+            '"framework_tags":["string"],'
+            '"evidence_quality":0.0,'
             '"severity_override":"critical|high|medium|low|info|unchanged",'
             '"impact_summary":"string",'
             '"reasoning_summary":"string",'
@@ -116,7 +120,11 @@ class PromptBuilder:
             "Escape backslashes inside JSON strings correctly.\n"
             "Return JSON only matching this schema:\n"
             "{"
-            '"summary":"string","rationale":"string","suggested_diff":"string","confidence":0.0,"needs_human_review":true'
+            '"summary":"string","rationale":"string","suggested_diff":"string","confidence":0.0,'
+            '"needs_human_review":true,'
+            '"validation_status":"valid|warning|invalid|not_run",'
+            '"validation_notes":["string"],'
+            '"alternatives":[{"label":"string","summary":"string","suggested_diff":"string"}]'
             "}\n"
             f"Evidence:\n{json.dumps(evidence, indent=2)}"
         )
