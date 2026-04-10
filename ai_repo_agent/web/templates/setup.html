@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Initial Setup | AI Repo Analyst</title>
+    <link rel="stylesheet" href="/static/auth.css?v=1">
+  </head>
+  <body>
+    <div class="auth-shell">
+      <section class="auth-hero warm">
+        <p class="eyebrow">First-Time Setup</p>
+        <h1>Create the first local account for this device.</h1>
+        <p class="lead">This account will unlock the review workspace and store credentials in the same SQLite-backed environment as the rest of the application.</p>
+        <div class="hero-points">
+          <span>Local-first authentication</span>
+          <span>PBKDF2 password hashing</span>
+          <span>Separate auth pages and session flow</span>
+        </div>
+      </section>
+
+      <section class="auth-panel">
+        <p class="eyebrow">Setup</p>
+        <h2>Create admin account</h2>
+        <p class="panel-copy">This only runs when no users exist yet.</p>
+        {% if error %}
+        <div class="auth-error">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="/setup" class="auth-form">
+          <label>
+            Username
+            <input name="username" type="text" autocomplete="username" required>
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="new-password" required>
+          </label>
+          <label>
+            Confirm password
+            <input name="confirm_password" type="password" autocomplete="new-password" required>
+          </label>
+          <button type="submit">Create Account</button>
+        </form>
+      </section>
+    </div>
+  </body>
+</html>

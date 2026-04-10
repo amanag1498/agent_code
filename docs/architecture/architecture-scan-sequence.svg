@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200" role="img" aria-labelledby="title desc">
+  <title id="title">AI Repo Analyst Scan Sequence</title>
+  <desc id="desc">Sequence diagram showing the end-to-end repository scan flow.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f7f2; }
+      .title { font: 700 32px Helvetica, Arial, sans-serif; fill: #183153; }
+      .subtitle { font: 400 16px Helvetica, Arial, sans-serif; fill: #49617c; }
+      .actor { font: 700 16px Helvetica, Arial, sans-serif; fill: #183153; }
+      .step { font: 400 15px Helvetica, Arial, sans-serif; fill: #29435c; }
+      .lane { stroke: #8ca1b4; stroke-width: 2; stroke-dasharray: 8 8; }
+      .msg { stroke: #27445d; stroke-width: 2.5; fill: none; marker-end: url(#arrowhead); }
+      .box { fill: #ffffff; stroke: #27445d; stroke-width: 2; rx: 14; ry: 14; }
+      .header { fill: #d6e8f7; stroke: #27445d; stroke-width: 2; rx: 14; ry: 14; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <polygon points="0 0, 10 5, 0 10" fill="#27445d"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1800" height="1200"/>
+  <text class="title" x="90" y="70">AI Repo Analyst End-to-End Scan Flow</text>
+  <text class="subtitle" x="90" y="100">Sequence view of how a local repository becomes a persisted intelligence snapshot</text>
+
+  <g>
+    <rect class="header" x="90" y="140" width="180" height="54"/>
+    <text class="actor" x="155" y="174">User / UI</text>
+    <line class="lane" x1="180" y1="194" x2="180" y2="1120"/>
+  </g>
+  <g>
+    <rect class="header" x="350" y="140" width="220" height="54"/>
+    <text class="actor" x="394" y="174">FastAPI Server</text>
+    <line class="lane" x1="460" y1="194" x2="460" y2="1120"/>
+  </g>
+  <g>
+    <rect class="header" x="650" y="140" width="240" height="54"/>
+    <text class="actor" x="691" y="174">Scan Orchestrator</text>
+    <line class="lane" x1="770" y1="194" x2="770" y2="1120"/>
+  </g>
+  <g>
+    <rect class="header" x="980" y="140" width="210" height="54"/>
+    <text class="actor" x="1022" y="174">Analysis Layer</text>
+    <line class="lane" x1="1085" y1="194" x2="1085" y2="1120"/>
+  </g>
+  <g>
+    <rect class="header" x="1290" y="140" width="140" height="54"/>
+    <text class="actor" x="1340" y="174">SQLite</text>
+    <line class="lane" x1="1360" y1="194" x2="1360" y2="1120"/>
+  </g>
+  <g>
+    <rect class="header" x="1510" y="140" width="180" height="54"/>
+    <text class="actor" x="1569" y="174">LLM Layer</text>
+    <line class="lane" x1="1600" y1="194" x2="1600" y2="1120"/>
+  </g>
+
+  <rect class="box" x="120" y="225" width="120" height="40"/>
+  <text class="step" x="145" y="250">Start scan</text>
+  <path class="msg" d="M180 245 L460 245"/>
+  <text class="step" x="268" y="235">POST /api/scan</text>
+
+  <rect class="box" x="390" y="290" width="140" height="40"/>
+  <text class="step" x="408" y="315">Create job</text>
+  <path class="msg" d="M460 310 L770 310"/>
+  <text class="step" x="558" y="300">submit background scan</text>
+
+  <rect class="box" x="700" y="360" width="140" height="40"/>
+  <text class="step" x="720" y="385">Load repo</text>
+  <path class="msg" d="M770 380 L1085 380"/>
+  <text class="step" x="860" y="370">inventory, git, language, dependencies</text>
+
+  <rect class="box" x="1015" y="430" width="140" height="40"/>
+  <text class="step" x="1032" y="455">Repo context</text>
+  <path class="msg" d="M1085 450 L770 450"/>
+  <text class="step" x="866" y="440">files, git state, summary</text>
+
+  <rect class="box" x="700" y="500" width="140" height="40"/>
+  <text class="step" x="721" y="525">Persist base</text>
+  <path class="msg" d="M770 520 L1360 520"/>
+  <text class="step" x="974" y="510">repository, snapshot, files, dependencies</text>
+
+  <rect class="box" x="1015" y="570" width="140" height="40"/>
+  <text class="step" x="1034" y="595">Parse code</text>
+  <path class="msg" d="M770 590 L1085 590"/>
+  <text class="step" x="856" y="580">extract symbols and code units</text>
+
+  <rect class="box" x="1010" y="640" width="150" height="40"/>
+  <text class="step" x="1028" y="665">Build memory</text>
+  <path class="msg" d="M1085 660 L770 660"/>
+  <text class="step" x="856" y="650">chunks and structural metadata</text>
+
+  <rect class="box" x="700" y="710" width="140" height="40"/>
+  <text class="step" x="723" y="735">Embed data</text>
+  <path class="msg" d="M770 730 L1360 730"/>
+  <text class="step" x="1002" y="720">store symbols, chunks, vectors</text>
+
+  <rect class="box" x="1540" y="780" width="120" height="40"/>
+  <text class="step" x="1560" y="805">Review repo</text>
+  <path class="msg" d="M770 800 L1600 800"/>
+  <text class="step" x="1105" y="790">build evidence batches and generate findings</text>
+
+  <rect class="box" x="1540" y="850" width="120" height="40"/>
+  <text class="step" x="1557" y="875">Findings</text>
+  <path class="msg" d="M1600 870 L1360 870"/>
+  <text class="step" x="1432" y="860">persist findings and reviews</text>
+
+  <rect class="box" x="1015" y="920" width="140" height="40"/>
+  <text class="step" x="1035" y="945">Compare</text>
+  <path class="msg" d="M770 940 L1085 940"/>
+  <text class="step" x="885" y="930">diff against prior snapshot</text>
+
+  <rect class="box" x="1015" y="990" width="140" height="40"/>
+  <text class="step" x="1031" y="1015">Risk + summary</text>
+  <path class="msg" d="M1085 1010 L770 1010"/>
+  <text class="step" x="876" y="1000">trend metadata and final snapshot summary</text>
+
+  <rect class="box" x="390" y="1060" width="140" height="40"/>
+  <text class="step" x="411" y="1085">Return result</text>
+  <path class="msg" d="M770 1080 L460 1080"/>
+  <path class="msg" d="M460 1098 L180 1098"/>
+  <text class="step" x="284" y="1068">scan complete payload</text>
+
+  <text class="subtitle" x="90" y="1160">Outcome: one repository scan becomes a durable snapshot powering compare, retrieval, chat, reporting, and patch workflows.</text>
+</svg>

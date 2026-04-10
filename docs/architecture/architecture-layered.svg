@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">AI Repo Analyst Layered Architecture</title>
+  <desc id="desc">Leadership view of the AI Repo Analyst layered architecture.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f6f7f4; }
+      .title { font: 700 34px Helvetica, Arial, sans-serif; fill: #183153; }
+      .subtitle { font: 400 17px Helvetica, Arial, sans-serif; fill: #49617c; }
+      .layer-title { font: 700 24px Helvetica, Arial, sans-serif; fill: #183153; }
+      .body { font: 400 17px Helvetica, Arial, sans-serif; fill: #29435c; }
+      .small { font: 400 15px Helvetica, Arial, sans-serif; fill: #45607a; }
+      .box-stroke { stroke: #27445d; stroke-width: 2; rx: 22; ry: 22; }
+      .arrow { stroke: #27445d; stroke-width: 3; fill: none; marker-end: url(#arrowhead); }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+      <polygon points="0 0, 10 5, 0 10" fill="#27445d"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="900"/>
+
+  <text class="title" x="120" y="80">AI Repo Analyst</text>
+  <text class="subtitle" x="120" y="116">Leadership architecture view: local-first repository intelligence platform with grounded AI workflows</text>
+
+  <g>
+    <rect class="box-stroke" x="180" y="170" width="1240" height="98" fill="#d6e8f7"/>
+    <text class="layer-title" x="220" y="210">1. Experience Layer</text>
+    <text class="body" x="220" y="244">FastAPI web app, local review workspace, scan controls, compare view, logs, settings, chat, patch lab, reporting</text>
+  </g>
+
+  <g>
+    <rect class="box-stroke" x="180" y="300" width="1240" height="110" fill="#fde4bd"/>
+    <text class="layer-title" x="220" y="342">2. Orchestration Layer</text>
+    <text class="body" x="220" y="376">Use-case services coordinate scan, compare, chat, patch, pre-commit, background jobs, and runtime wiring</text>
+  </g>
+
+  <g>
+    <rect class="box-stroke" x="180" y="442" width="1240" height="146" fill="#d8f0d1"/>
+    <text class="layer-title" x="220" y="484">3. Intelligence Layer</text>
+    <text class="body" x="220" y="518">Repository loading, code parsing, symbol extraction, structural chunking, local embeddings, retrieval,</text>
+    <text class="body" x="220" y="548">drift analysis, risk scoring, evidence packaging, prompting, and structured LLM review workflows</text>
+  </g>
+
+  <g>
+    <rect class="box-stroke" x="180" y="620" width="1240" height="110" fill="#e8ddf8"/>
+    <text class="layer-title" x="220" y="662">4. Persistence Layer</text>
+    <text class="body" x="220" y="696">SQLite-backed system memory for repositories, snapshots, findings, deltas, symbols, chunks, vectors, reviews, chat, patches, and settings</text>
+  </g>
+
+  <g>
+    <rect class="box-stroke" x="180" y="762" width="1240" height="88" fill="#f6d8cf"/>
+    <text class="layer-title" x="220" y="802">5. Integration Layer</text>
+    <text class="body" x="220" y="834">Filesystem, git CLI, optional Tree-sitter, optional LSP tooling, optional LLM providers, report export</text>
+  </g>
+
+  <path class="arrow" d="M800 268 L800 298"/>
+  <path class="arrow" d="M800 410 L800 440"/>
+  <path class="arrow" d="M800 588 L800 618"/>
+  <path class="arrow" d="M800 730 L800 760"/>
+
+  <text class="small" x="120" y="874">Core message: the platform is snapshot-centric, local-first, and modular across analysis and AI provider layers.</text>
+</svg>

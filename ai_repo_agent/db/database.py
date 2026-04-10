@@ -219,6 +219,14 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS auth_users (
+    username TEXT PRIMARY KEY,
+    password_hash TEXT NOT NULL,
+    salt TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
+);
 """
 
 

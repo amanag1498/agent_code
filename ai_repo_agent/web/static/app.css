@@ -36,6 +36,25 @@ body {
   min-height: 100%;
 }
 
+.hidden {
+  display: none !important;
+}
+
+.inline-form {
+  display: inline-flex;
+  margin: 0;
+}
+
+.workspace-logout {
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #23354f, #111827);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-weight: 800;
+  box-shadow: 0 10px 20px rgba(17, 24, 39, 0.18);
+}
+
 body {
   margin: 0;
   font-family: var(--font-ui);
@@ -140,6 +159,14 @@ pre {
   gap: 20px;
   min-height: 100vh;
   padding: 18px;
+}
+
+#chat-validation {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(17, 24, 39, 0.05);
+  border: 1px solid rgba(84, 101, 125, 0.12);
 }
 
 .command-rail,
@@ -316,7 +343,8 @@ pre {
 #report-html,
 #install-hook,
 #scan-cancel,
-#trim-history {
+#trim-history,
+#auth-logout-inline {
   padding: 11px 14px;
   border-radius: 14px;
   background: linear-gradient(135deg, var(--accent-blue), var(--accent-cyan));
@@ -335,7 +363,8 @@ pre {
 #report-html:hover,
 #install-hook:hover,
 #scan-cancel:hover,
-#trim-history:hover {
+#trim-history:hover,
+#auth-logout-inline:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 18px rgba(35, 119, 255, 0.18);
 }
@@ -347,11 +376,42 @@ pre {
 #report-md,
 #report-html,
 #scan-cancel,
-#trim-history {
+#trim-history,
+#auth-logout-inline {
   background: rgba(255, 255, 255, 0.08);
   color: inherit;
   border: 1px solid rgba(216, 224, 234, 0.12);
   box-shadow: none;
+}
+
+.workspace-logout,
+.workspace-logout:hover {
+  color: #fff !important;
+  background: linear-gradient(135deg, #23354f, #111827) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  box-shadow: 0 10px 20px rgba(17, 24, 39, 0.18) !important;
+}
+
+.settings-inline-label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--slate-600);
+}
+
+.settings-inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--slate-700);
+}
+
+.settings-inline-check input {
+  width: auto;
 }
 
 button:disabled {

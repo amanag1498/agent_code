@@ -34,13 +34,15 @@ function bindElements() {
     "compare-summary", "compare-files", "compare-dependency-list", "memory-timeline",
     "memory-detail", "memory-symbols", "memory-chunks", "chat-output", "chat-question",
     "chat-send", "patch-generate", "patch-output", "patch-selection", "patch-validation", "patch-alternatives", "patch-diff-preview", "refresh-logs", "log-output",
+    "validator-prompt", "validator-use-case", "validator-blocked-terms", "validator-strict-mode", "validator-run", "validator-result",
     "settings-form", "settings-provider", "settings-api-key", "settings-model", "settings-base-url", "settings-analyzer-backend",
     "settings-lsp-enabled", "settings-timeout", "settings-retries", "settings-max-findings", "settings-chunk-lines", "settings-watch",
     "settings-log-level", "settings-worker-limit", "settings-retention-count", "install-hook", "trim-history", "report-json", "report-md", "report-html",
     "filter-severity", "filter-category", "filter-source", "repo-graph", "graph-summary",
     "signal-bands", "tree-breadcrumb", "finding-kpis", "compare-insights", "compare-code-viewer", "compare-drift-view",
     "memory-constellation", "memory-constellation-summary", "scan-stage", "scan-badge",
-    "scan-progress-bar", "scan-status-text", "scan-percent", "scan-activity", "scan-cancel"
+    "scan-progress-bar", "scan-status-text", "scan-percent", "scan-activity", "scan-cancel",
+    "auth-chip", "chat-validation"
   ];
   for (const id of ids) {
     elements[id] = document.getElementById(id);
@@ -69,6 +71,7 @@ function bindEvents() {
   elements["tree-filter"].addEventListener("input", () => renderTree());
   elements["chat-send"].addEventListener("click", sendChat);
   elements["patch-generate"].addEventListener("click", generatePatch);
+  elements["validator-run"].addEventListener("click", runPromptValidation);
   elements["refresh-logs"].addEventListener("click", loadLogs);
   elements["scan-cancel"].addEventListener("click", cancelScanJob);
   elements["settings-form"].addEventListener("submit", saveSettings);
@@ -86,10 +89,15 @@ function bindEvents() {
 async function loadBootstrap() {
   const response = await fetch("/api/bootstrap");
   const payload = await response.json();
-  state.repositories = payload.repositories;
+  if (payload.auth?.username) {
+    elements["auth-chip"].textContent = `Signed in as ${payload.auth.username}`;
+  }
+  state.repositories = payload.repositories || [];
   renderRepositories();
-  applySettings(payload.settings);
-  renderLogs(payload.logs);
+  renderLogs(payload.logs || []);
+  if (payload.settings) {
+    applySettings(payload.settings);
+  }
   if (state.repositories.length) {
     await loadRepository(state.repositories[0].id);
   }
@@ -751,6 +759,26 @@ async function sendChat() {
   if (!state.currentRepository || !state.currentSnapshot) return;
   const question = elements["chat-question"].value.trim();
   if (!question) return;
+  const validationResponse = await fetch("/api/prompt/validate", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      prompt: question,
+      use_case: "repo_chat",
+      blocked_terms: ["rm -rf", "drop database", "steal credentials"],
+      strict_mode: true,
+    }),
+  });
+  const validation = await validationResponse.json();
+  if (!validationResponse.ok) {
+    elements["chat-validation"].textContent = validation.detail || "Prompt validation request failed.";
+    return;
+  }
+  renderChatValidation(validation);
+  if (!validation.accepted) {
+    appendChat("Validator", `Rejected: ${validation.issues?.join("; ") || validation.reasoning || "Prompt was rejected."}`);
+    return;
+  }
   appendChat("User", question);
   elements["chat-question"].value = "";
   const response = await fetch("/api/chat", {
@@ -763,6 +791,13 @@ async function sendChat() {
     }),
   });
   const payload = await response.json();
+  if (!response.ok) {
+    const detail = payload.detail?.validation || payload.detail || {};
+    renderChatValidation(detail);
+    appendChat("Validator", detail.message || detail.reasoning || "Chat request was blocked.");
+    return;
+  }
+  renderChatValidation(payload.validation || validation);
   appendChat("Assistant", payload.answer || "No response.");
   await loadLogs();
 }
@@ -798,6 +833,65 @@ async function generatePatch() {
   await loadLogs();
 }
 
+async function runPromptValidation() {
+  const prompt = elements["validator-prompt"].value.trim();
+  if (!prompt) {
+    elements["validator-result"].textContent = "Enter a prompt first.";
+    return;
+  }
+  elements["validator-result"].textContent = "Validating prompt...";
+  elements["validator-run"].disabled = true;
+  const blockedTerms = elements["validator-blocked-terms"].value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  try {
+    const response = await fetch("/api/prompt/validate", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        prompt,
+        use_case: elements["validator-use-case"].value.trim() || "general",
+        blocked_terms: blockedTerms,
+        strict_mode: elements["validator-strict-mode"].checked,
+      }),
+    });
+    const rawText = await response.text();
+    let payload = {};
+    try {
+      payload = rawText ? JSON.parse(rawText) : {};
+    } catch (error) {
+      payload = {detail: rawText || `Validator returned a non-JSON response: ${error}`};
+    }
+    if (!response.ok) {
+      const detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail || payload, null, 2);
+      elements["validator-result"].textContent = detail || "Prompt validation failed.";
+      return;
+    }
+    elements["validator-result"].textContent = [
+      `Accepted: ${payload.accepted}`,
+      `Risk Level: ${payload.risk_level || "n/a"}`,
+      `Recommendation: ${payload.recommendation || "n/a"}`,
+      `LLM Used: ${payload.llm_used ? "yes" : "no"}`,
+      `Validation Mode: ${payload.validation_mode || "n/a"}`,
+      `LLM Error: ${payload.llm_error || "none"}`,
+      `Categories: ${(payload.categories || []).join(", ") || "none"}`,
+      `Local Flags: ${(payload.local_flags || []).join(", ") || "none"}`,
+      `Issues: ${(payload.issues || []).join("; ") || "none"}`,
+      "",
+      "Sanitized Prompt:",
+      payload.sanitized_prompt || "",
+      "",
+      "Reasoning:",
+      payload.reasoning || "",
+    ].join("\n");
+  } catch (error) {
+    elements["validator-result"].textContent = `Prompt validation request failed: ${error}`;
+  } finally {
+    elements["validator-run"].disabled = false;
+  }
+}
+
 async function loadLogs() {
   const response = await fetch("/api/logs");
   const payload = await response.json();
@@ -806,6 +900,24 @@ async function loadLogs() {
 
 function renderLogs(logs) {
   elements["log-output"].textContent = logs.join("\n");
+}
+
+function renderChatValidation(validation) {
+  if (!validation) {
+    elements["chat-validation"].textContent = "Prompt validation status will appear here before the LLM call.";
+    return;
+  }
+  elements["chat-validation"].textContent = [
+    `Accepted: ${validation.accepted}`,
+    `Risk: ${validation.risk_level || "n/a"}`,
+    `Recommendation: ${validation.recommendation || "n/a"}`,
+    `LLM Used: ${validation.llm_used ? "yes" : "no"}`,
+    `Validation Mode: ${validation.validation_mode || "n/a"}`,
+    `LLM Error: ${validation.llm_error || "none"}`,
+    `Flags: ${(validation.local_flags || []).join(", ") || "none"}`,
+    `Issues: ${(validation.issues || []).join("; ") || "none"}`,
+    `Sanitized Prompt: ${validation.sanitized_prompt || ""}`,
+  ].join("\n");
 }
 
 function applySettings(settings) {

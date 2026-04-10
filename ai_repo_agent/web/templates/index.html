@@ -60,8 +60,9 @@
             <button data-page="memory" class="nav-item"><span class="nav-order">05</span><span>Memory</span></button>
             <button data-page="chat" class="nav-item"><span class="nav-order">06</span><span>Repo Chat</span></button>
             <button data-page="patch" class="nav-item"><span class="nav-order">07</span><span>Patch Lab</span></button>
-            <button data-page="logs" class="nav-item"><span class="nav-order">08</span><span>Logs</span></button>
-            <button data-page="settings" class="nav-item"><span class="nav-order">09</span><span>Settings</span></button>
+            <button data-page="validator" class="nav-item"><span class="nav-order">08</span><span>Prompt Validator</span></button>
+            <button data-page="logs" class="nav-item"><span class="nav-order">09</span><span>Logs</span></button>
+            <button data-page="settings" class="nav-item"><span class="nav-order">10</span><span>Settings</span></button>
           </nav>
         </section>
 
@@ -86,6 +87,10 @@
               <p id="hero-meta" class="subcopy">Scan a local repository to populate findings, history, and compare data.</p>
             </div>
             <div class="hero-ribbon">
+              <span id="auth-chip" class="ribbon-chip">Authenticated</span>
+              <form action="/logout" method="post" class="inline-form">
+                <button id="auth-logout-inline" type="submit" class="workspace-logout">Sign Out</button>
+              </form>
               <span class="ribbon-chip">Persistent memory</span>
               <span class="ribbon-chip">Structured findings</span>
               <span class="ribbon-chip">Diff-aware review</span>
@@ -429,6 +434,7 @@
                   <textarea id="chat-question" placeholder="Ask about auth paths, dependencies, risks, or changed code..."></textarea>
                   <button id="chat-send">Send Question</button>
                 </div>
+                <pre id="chat-validation">Prompt validation status will appear here before the LLM call.</pre>
               </article>
             </div>
           </section>
@@ -468,6 +474,40 @@
               <div class="surface-head"><div><p class="eyebrow">Diff Preview</p><h3>Unified diff preview</h3></div></div>
               <pre id="patch-diff-preview">Generate a patch to preview its diff.</pre>
             </article>
+          </section>
+
+          <section id="page-validator" class="page">
+            <div class="page-header">
+              <div>
+                <p class="eyebrow">Prompt Validator</p>
+                <h3>Validate prompts before sending them to an LLM</h3>
+              </div>
+              <p class="page-note">Use this page to test blocked terms, strict mode, sanitization, risk level, and the final recommendation.</p>
+            </div>
+
+            <div class="chat-layout">
+              <article class="surface">
+                <div class="surface-head"><div><p class="eyebrow">Compose</p><h3>Prompt input</h3></div></div>
+                <div class="chat-compose">
+                  <textarea id="validator-prompt" placeholder="Paste any prompt you want to validate..."></textarea>
+                  <label class="settings-inline-label">Use case
+                    <input id="validator-use-case" type="text" value="general" placeholder="general">
+                  </label>
+                  <label class="settings-inline-label">Blocked terms
+                    <input id="validator-blocked-terms" type="text" placeholder="rm -rf, drop database">
+                  </label>
+                  <label class="settings-inline-check">
+                    <input id="validator-strict-mode" type="checkbox">
+                    <span>Strict mode</span>
+                  </label>
+                  <button id="validator-run" type="button">Validate Prompt</button>
+                </div>
+              </article>
+              <article class="surface compact-surface">
+                <div class="surface-head"><div><p class="eyebrow">Result</p><h3>Validation output</h3></div></div>
+                <pre id="validator-result">Run validation to inspect accepted status, sanitization, issues, recommendation, and reasoning.</pre>
+              </article>
+            </div>
           </section>
 
           <section id="page-logs" class="page">

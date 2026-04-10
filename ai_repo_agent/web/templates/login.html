@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Sign In | AI Repo Analyst</title>
+    <link rel="stylesheet" href="/static/auth.css?v=1">
+  </head>
+  <body>
+    <div class="auth-shell">
+      <section class="auth-hero">
+        <p class="eyebrow">AI Repo Analyst</p>
+        <h1>Local repository review, protected with device-local sign-in.</h1>
+        <p class="lead">Use your username and password to access the workspace for scanning, drift analysis, chat, and patch generation.</p>
+        <div class="hero-points">
+          <span>SQLite-backed login storage</span>
+          <span>Grounded repo chat</span>
+          <span>Snapshot compare workflows</span>
+        </div>
+      </section>
+
+      <section class="auth-panel">
+        <p class="eyebrow">Sign In</p>
+        <h2>Welcome back</h2>
+        <p class="panel-copy">Authenticate to enter the review studio.</p>
+        {% if error %}
+        <div class="auth-error">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="/login" class="auth-form">
+          <label>
+            Username
+            <input name="username" type="text" autocomplete="username" required>
+          </label>
+          <label>
+            Password
+            <input name="password" type="password" autocomplete="current-password" required>
+          </label>
+          <button type="submit">Sign In</button>
+        </form>
+      </section>
+    </div>
+  </body>
+</html>

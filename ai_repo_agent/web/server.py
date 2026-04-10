@@ -4,26 +4,29 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 import platform
+import secrets
 import subprocess
 import threading
 import time
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-from starlette.requests import Request
 
 from ai_repo_agent.core.logging_config import get_memory_log_handler, set_logging_level
 from ai_repo_agent.core.models import AppSettings
+from ai_repo_agent.integration_modules.auth_module import LoginService, SQLiteUserStore
+from ai_repo_agent.integration_modules.prompt_validator_module import PromptValidationRequest, PromptValidatorService
 from ai_repo_agent.llm.factory import create_provider
 from ai_repo_agent.reports.generator import ReportGenerator
 from ai_repo_agent.services.app_context import AppContext
@@ -76,6 +79,16 @@ class PrecommitRequest(BaseModel):
     repo_path: str
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class SetupRequest(BaseModel):
+    username: str
+    password: str
+
+
 @dataclass(slots=True)
 class ScanJob:
     job_id: str
@@ -103,22 +116,171 @@ def create_app() -> FastAPI:
     app.state.context = context
     app.state.log_handler = get_memory_log_handler()
     app.state.scan_jobs: dict[str, ScanJob] = {}
+    app.state.auth_sessions: dict[str, str] = {}
     app.state.scan_jobs_lock = threading.Lock()
     app.state.scan_executor = ThreadPoolExecutor(max_workers=max(1, context.settings.load().scan_worker_limit))
+    app.state.user_store = SQLiteUserStore(context.connection)
+    app.state.login_service = LoginService(app.state.user_store)
+    _ensure_seed_user(app)
     app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
+
+    @app.middleware("http")
+    async def auth_guard(request: Request, call_next):
+        if request.url.path.startswith("/api") and request.url.path not in {
+            "/api/bootstrap",
+            "/api/auth/status",
+            "/api/auth/login",
+            "/api/auth/logout",
+            "/api/auth/setup",
+        }:
+            if not _authenticated_username(request, app):
+                return JSONResponse({"detail": "Authentication required."}, status_code=401)
+        return await call_next(request)
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
+        username = _authenticated_username(request, app)
+        if not username:
+            target = "/setup" if not app.state.user_store.has_users() else "/login"
+            return RedirectResponse(target, status_code=303)
         return TEMPLATES.TemplateResponse(request, "index.html", {"request": request})
 
+    @app.get("/login", response_class=HTMLResponse)
+    async def login_page(request: Request) -> HTMLResponse:
+        username = _authenticated_username(request, app)
+        if username:
+            return RedirectResponse("/", status_code=303)
+        if not app.state.user_store.has_users():
+            return RedirectResponse("/setup", status_code=303)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "request": request,
+                "error": request.query_params.get("error", ""),
+            },
+        )
+
+    @app.post("/login")
+    async def login_submit(request: Request) -> RedirectResponse:
+        form = await request.form()
+        username = str(form.get("username", "")).strip()
+        password = str(form.get("password", ""))
+        result = app.state.login_service.authenticate(username, password)
+        if not result.success:
+            return RedirectResponse(f"/login?error={result.message}", status_code=303)
+        token = secrets.token_urlsafe(32)
+        app.state.auth_sessions[token] = result.username or ""
+        response = RedirectResponse("/", status_code=303)
+        response.set_cookie("ai_repo_session", token, httponly=True, samesite="lax")
+        return response
+
+    @app.get("/setup", response_class=HTMLResponse)
+    async def setup_page(request: Request) -> HTMLResponse:
+        username = _authenticated_username(request, app)
+        if username:
+            return RedirectResponse("/", status_code=303)
+        if app.state.user_store.has_users():
+            return RedirectResponse("/login", status_code=303)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "setup.html",
+            {
+                "request": request,
+                "error": request.query_params.get("error", ""),
+            },
+        )
+
+    @app.post("/setup")
+    async def setup_submit(request: Request) -> RedirectResponse:
+        if app.state.user_store.has_users():
+            return RedirectResponse("/login", status_code=303)
+        form = await request.form()
+        username = str(form.get("username", "")).strip()
+        password = str(form.get("password", ""))
+        confirm_password = str(form.get("confirm_password", ""))
+        if password != confirm_password:
+            return RedirectResponse("/setup?error=Passwords do not match.", status_code=303)
+        try:
+            app.state.login_service.register_user(username, password)
+        except ValueError as exc:
+            return RedirectResponse(f"/setup?error={exc}", status_code=303)
+        return RedirectResponse("/login", status_code=303)
+
+    @app.post("/logout")
+    async def logout_submit(request: Request) -> RedirectResponse:
+        token = request.cookies.get("ai_repo_session", "")
+        if token:
+            app.state.auth_sessions.pop(token, None)
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie("ai_repo_session")
+        return response
+
     @app.get("/api/bootstrap")
-    async def bootstrap() -> JSONResponse:
+    async def bootstrap(request: Request) -> JSONResponse:
+        username = _authenticated_username(request, app)
         payload = {
-            "repositories": [_serialize(repo) for repo in context.repositories.list_all()],
-            "settings": _serialize(context.settings.load()),
-            "logs": app.state.log_handler.get_entries()[-100:],
+            "auth": {
+                "authenticated": bool(username),
+                "username": username,
+                "requires_setup": not app.state.user_store.has_users(),
+            },
+            "repositories": [_serialize(repo) for repo in context.repositories.list_all()] if username else [],
+            "settings": _serialize(context.settings.load()) if username else None,
+            "logs": app.state.log_handler.get_entries()[-100:] if username else [],
         }
         return JSONResponse(payload)
+
+    @app.get("/api/auth/status")
+    async def auth_status(request: Request) -> JSONResponse:
+        username = _authenticated_username(request, app)
+        return JSONResponse(
+            {
+                "authenticated": bool(username),
+                "username": username,
+                "requires_setup": not app.state.user_store.has_users(),
+            }
+        )
+
+    @app.post("/api/auth/setup")
+    async def auth_setup(request: SetupRequest) -> JSONResponse:
+        if app.state.user_store.has_users():
+            raise HTTPException(status_code=400, detail="Initial setup is already complete.")
+        try:
+            account = app.state.login_service.register_user(request.username, request.password)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return JSONResponse({"created": True, "username": account.username})
+
+    @app.post("/api/auth/login")
+    async def auth_login(request: LoginRequest) -> JSONResponse:
+        result = app.state.login_service.authenticate(request.username, request.password)
+        if not result.success:
+            raise HTTPException(status_code=401, detail=result.message)
+        token = secrets.token_urlsafe(32)
+        app.state.auth_sessions[token] = result.username or ""
+        response = JSONResponse({"authenticated": True, "username": result.username})
+        response.set_cookie("ai_repo_session", token, httponly=True, samesite="lax")
+        return response
+
+    @app.post("/api/auth/logout")
+    async def auth_logout(request: Request) -> JSONResponse:
+        token = request.cookies.get("ai_repo_session", "")
+        if token:
+            app.state.auth_sessions.pop(token, None)
+        response = JSONResponse({"authenticated": False})
+        response.delete_cookie("ai_repo_session")
+        return response
+
+    @app.post("/api/prompt/validate")
+    async def validate_prompt(request: PromptValidationRequest) -> JSONResponse:
+        try:
+            validator = PromptValidatorService(_provider(context))
+            result = validator.validate(request)
+            return JSONResponse(result.model_dump(mode="json"))
+        except Exception as exc:
+            LOGGER.exception("Prompt validation failed unexpectedly.")
+            raise HTTPException(status_code=500, detail=f"Prompt validation failed: {exc}") from exc
 
     @app.get("/api/repositories")
     async def repositories() -> JSONResponse:
@@ -225,12 +387,29 @@ def create_app() -> FastAPI:
 
     @app.post("/api/chat")
     async def repo_chat(request: ChatRequest) -> JSONResponse:
+        validator = PromptValidatorService(_provider(context))
+        validation = validator.validate(
+            PromptValidationRequest(
+                prompt=request.question,
+                use_case="repo_chat",
+                blocked_terms=["rm -rf", "drop database", "steal credentials"],
+                strict_mode=True,
+            )
+        )
+        if not validation.accepted or validation.recommendation == "reject":
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "message": "Prompt validation rejected the chat request.",
+                    "validation": validation.model_dump(mode="json"),
+                },
+            )
         answer = ChatOrchestrator(context.chat, context.embeddings, context.reviews, _provider(context)).ask(
             request.repo_id,
             request.snapshot_id,
-            request.question,
+            validation.sanitized_prompt,
         )
-        return JSONResponse({"answer": answer})
+        return JSONResponse({"answer": answer, "validation": validation.model_dump(mode="json")})
 
     @app.post("/api/patch")
     async def repo_patch(request: PatchRequest) -> JSONResponse:
@@ -314,6 +493,24 @@ def create_app() -> FastAPI:
         return FileResponse(target)
 
     return app
+
+
+def _ensure_seed_user(app: FastAPI) -> None:
+    if app.state.user_store.has_users():
+        return
+    username = os.getenv("AI_REPO_ANALYST_ADMIN_USERNAME", "").strip()
+    password = os.getenv("AI_REPO_ANALYST_ADMIN_PASSWORD", "").strip()
+    if not username or not password:
+        return
+    app.state.login_service.register_user(username, password)
+    LOGGER.warning("Seeded login user '%s' from environment bootstrap configuration.", username)
+
+
+def _authenticated_username(request: Request, app: FastAPI) -> str | None:
+    token = request.cookies.get("ai_repo_session", "")
+    if not token:
+        return None
+    return app.state.auth_sessions.get(token)
 
 
 def _provider(context: AppContext):
