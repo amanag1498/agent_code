@@ -13,6 +13,14 @@ from ai_repo_agent.integration_modules.prompt_validator_module import (
     PromptValidationResponse,
     PromptValidatorService,
 )
+from ai_repo_agent.integration_modules.uipath_project_module import (
+    OpenAICompatibleLLMClient,
+    UiPathFinding,
+    UiPathProjectAnalysis,
+    UiPathProjectAnalyzer,
+    UiPathWorkflowSummary,
+    analyze_uipath_project,
+)
 
 __all__ = [
     "AuthResult",
@@ -24,4 +32,10 @@ __all__ = [
     "PromptValidationRequest",
     "PromptValidationResponse",
     "PromptValidatorService",
+    "OpenAICompatibleLLMClient",
+    "UiPathFinding",
+    "UiPathProjectAnalysis",
+    "UiPathProjectAnalyzer",
+    "UiPathWorkflowSummary",
+    "analyze_uipath_project",
 ]
